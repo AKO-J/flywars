@@ -23,6 +23,12 @@ from settings import (
     PowerUpType,
 )
 from sprites.player import Player
+from systems.ui_helpers import (
+    draw_panel, draw_text_centered, draw_text_left, draw_separator,
+    draw_progress_bar, get_font,
+    PANEL_BG, PANEL_BORDER, PANEL_BORDER_LIGHT,
+    ACCENT_GOLD, ACCENT_CYAN, TEXT_DIM, TEXT_NORMAL, TEXT_BRIGHT,
+)
 
 
 # ==========================================================================
@@ -292,65 +298,81 @@ class UISystem:
         enemy_count: int,
         tc: dict[str, int],
     ) -> None:
-        """左上角 HUD：HP 条 → 蓄力 → 分数 → 关卡 → 敌机统计"""
+        """左上角 HUD：带半透明面板背景 — HP条 → 蓄力 → 分数 → 关卡 → 敌机统计"""
         x0, y = 8, 8
-        gap: int = 5
+        pad = 6  # 面板内边距
 
-        # ── 第1行：HP 条 ──
-        bar_w, bar_h = 140, 12
+        # ── 半透明面板背景 ──
+        panel_w, panel_h = 210, 120
+        draw_panel(screen, (x0 - pad, y - pad, panel_w, panel_h), alpha=200)
+
+        # ── 第1行：HP 条（分段式）──
+        bar_w, bar_h = 140, 14
         hp_ratio = player.hp / max(player.max_hp, 1)
 
-        # 深色底
-        pygame.draw.rect(screen, (25, 25, 25), (x0, y, bar_w, bar_h))
-        # 血量填充（颜色随比例变化）
-        if hp_ratio > 0.5:
-            hp_color = GREEN
-        elif hp_ratio > 0.25:
-            hp_color = YELLOW
-        else:
-            hp_color = RED
-        if hp_ratio > 0:
-            pygame.draw.rect(screen, hp_color, (x0, y, int(bar_w * hp_ratio), bar_h))
+        # 深色底 + 分段格
+        pygame.draw.rect(screen, (20, 20, 30), (x0, y, bar_w, bar_h))
+        # 分段填充
+        seg_w = bar_w / max(player.max_hp, 1)
+        for i in range(player.hp):
+            sx = x0 + int(i * seg_w)
+            sw = int(seg_w) - 1  # 段间留1px间隙
+            if hp_ratio > 0.5:
+                hp_color = GREEN
+            elif hp_ratio > 0.25:
+                hp_color = YELLOW
+            else:
+                hp_color = RED
+            pygame.draw.rect(screen, hp_color, (sx, y, sw, bar_h))
         # 边框
-        pygame.draw.rect(screen, GRAY, (x0, y, bar_w, bar_h), width=1)
-        # HP 数值覆在条上（居中）
+        pygame.draw.rect(screen, PANEL_BORDER_LIGHT, (x0, y, bar_w, bar_h), width=1)
+        # HP 数值
         hp_label = self._font_small.render(
-            f"HP {player.hp}/{player.max_hp}", True, WHITE
+            f"HP {player.hp}/{player.max_hp}", True, TEXT_BRIGHT
         )
-        # 文字在血条右侧
-        screen.blit(hp_label, (x0 + bar_w + 6, y - 1))
-        y += bar_h + gap
+        screen.blit(hp_label, (x0 + bar_w + 6, y))
+        y += bar_h + 6
 
         # ── 第2行：蓄力状态 ──
         charge_pct: int = int(player.charge_level * 100)
+        if charge_pct >= 80:
+            ch_color = GREEN
+        elif charge_pct >= 40:
+            ch_color = YELLOW
+        else:
+            ch_color = (160, 160, 175)
         charge_text = self._font_small.render(
-            f"蓄力 [SPACE]: {player.charge_name} ({charge_pct}%)",
-            True, (200, 200, 200)
+            f"蓄力: {player.charge_name} {charge_pct}%", True, ch_color
         )
         screen.blit(charge_text, (x0, y))
-        y += 18
-
-        # ── 第3行：分数 ──
-        score_surf = self._font_score.render(f"得分: {score}", True, YELLOW)
-        screen.blit(score_surf, (x0, y))
-        y += 22
-
-        # ── 第4行：关卡 ──
-        level_color = CYAN if self._level_up_timer > 0 else WHITE
-        level_surf = self._font_normal.render(
-            f"关卡: {self._current_level}", True, level_color
-        )
-        screen.blit(level_surf, (x0, y))
         y += 20
 
-        # ── 第5行：敌机统计 ──
-        enemy_surf = self._font_small.render(
-            f"敌机: {enemy_count} | "
-            f"普{tc['normal']} 快{tc['fast']} "
-            f"精{tc['elite']} 追{tc['tracking']}",
-            True, (160, 160, 160)
+        # ── 第3行：分数（金色高亮）──
+        score_surf = self._font_score.render(f"得分  {score}", True, ACCENT_GOLD)
+        screen.blit(score_surf, (x0, y))
+        y += 26
+
+        # ── 第4行：关卡 ──
+        level_color = ACCENT_CYAN if self._level_up_timer > 0 else TEXT_NORMAL
+        level_surf = self._font_normal.render(
+            f"关卡  {self._current_level}", True, level_color
         )
-        screen.blit(enemy_surf, (x0, y))
+        screen.blit(level_surf, (x0, y))
+        y += 22
+
+        # ── 第5行：敌机统计（分色显示）──
+        draw_text_left(screen, f"敌机:{enemy_count}", (x0, y), self._font_small, TEXT_DIM)
+        ex = x0 + 72
+        type_info = [
+            ("普", tc.get("normal", 0), (140, 180, 140)),
+            ("快", tc.get("fast", 0), (140, 140, 200)),
+            ("精", tc.get("elite", 0), (200, 160, 100)),
+            ("追", tc.get("tracking", 0), (200, 120, 120)),
+        ]
+        for label, count, color in type_info:
+            t = self._font_small.render(f"{label}{count}", True, color)
+            screen.blit(t, (ex, y))
+            ex += t.get_width() + 6
 
     # ================================================================
     # 飘字得分
@@ -370,7 +392,7 @@ class UISystem:
     # ================================================================
 
     def _draw_level_up(self, screen: pygame.Surface) -> None:
-        """关卡提升时屏幕中央闪现大字提示。"""
+        """关卡提升时屏幕中央闪现带面板的提示。"""
         if self._level_up_timer <= 0:
             return
 
@@ -387,14 +409,30 @@ class UISystem:
 
         cx, cy = SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 30
 
+        # ── 面板背景 ──
+        pw, ph = 280, 100
+        panel_x = cx - pw // 2
+        panel_y = cy - 40
+        panel_surf = pygame.Surface((pw, ph), pygame.SRCALPHA)
+        panel_surf.fill((10, 10, 25, min(200, alpha)))
+        screen.blit(panel_surf, (panel_x, panel_y))
+        # 边框
+        border_c = (0, min(180, alpha), min(200, alpha))
+        pygame.draw.rect(screen, border_c, (panel_x, panel_y, pw, ph), width=2)
+
+        # ── 上方装饰线 ──
+        line_w = 80
+        pygame.draw.line(screen, border_c,
+                         (cx - line_w, panel_y + 1), (cx + line_w, panel_y + 1), width=1)
+
         # 主标题
-        big = self._font_big.render(f"LEVEL {self._current_level}", True, CYAN)
+        big = self._font_big.render(f"LEVEL {self._current_level}", True, ACCENT_CYAN)
         big.set_alpha(alpha)
         big_rect = big.get_rect(center=(cx, cy))
         screen.blit(big, big_rect)
 
         # 副标题
-        small = self._font_normal.render("难度提升！", True, ORANGE)
+        small = self._font_normal.render("难度提升!", True, ORANGE)
         small.set_alpha(alpha)
         small_rect = small.get_rect(center=(cx, cy + 36))
         screen.blit(small, small_rect)

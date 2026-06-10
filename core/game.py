@@ -43,6 +43,12 @@ from systems.event_bus import EventBus, GameEvent, Event
 from systems.logger import GameLogger, LogLevel
 from systems.protocol import make_move, make_shoot, Message, TrafficStats
 from systems.network_client import NetworkClient, ConnectionState
+from systems.ui_helpers import (
+    draw_panel, draw_text_centered, draw_text_left, draw_separator,
+    draw_progress_bar, get_font,
+    PANEL_BG, PANEL_BORDER, PANEL_BORDER_LIGHT,
+    ACCENT_GOLD, ACCENT_CYAN, TEXT_DIM, TEXT_NORMAL, TEXT_BRIGHT,
+)
 
 
 _proto_stats = TrafficStats()
@@ -984,10 +990,10 @@ class Game:
     # ================================================================
 
     def _draw_menu_screen(self) -> None:
-        """绘制主菜单界面"""
+        """绘制主菜单界面（优化版：更清晰的视觉层次）"""
         # 半透明遮罩
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 140))
+        overlay.fill((0, 0, 0, 150))
         self.screen.blit(overlay, (0, 0))
 
         cx = SCREEN_WIDTH // 2
@@ -995,201 +1001,181 @@ class Game:
         font_text  = pygame.font.Font(UI_FONT_PATH, 22)
         font_hint  = pygame.font.Font(UI_FONT_PATH, 30)
 
-        # 标题
-        title = font_title.render("飞机大战", True, YELLOW)
-        self.screen.blit(title, title.get_rect(center=(cx, 140)))
+        # ── 标题（带阴影增加立体感）──
+        draw_text_centered(self.screen, "飞机大战", (cx, 120), font_title,
+                           ACCENT_GOLD, shadow=True, shadow_color=(80, 60, 0))
 
         # 副标题
-        sub = font_text.render("—  Shmup  —", True, CYAN)
-        self.screen.blit(sub, sub.get_rect(center=(cx, 190)))
+        sub = font_text.render("—  Shmup  —", True, ACCENT_CYAN)
+        self.screen.blit(sub, sub.get_rect(center=(cx, 172)))
 
-        # 操作说明
+        # ── 装饰分隔线 ──
+        draw_separator(self.screen, 200, cx - 120, cx + 120, PANEL_BORDER_LIGHT)
+
+        # ── 操作说明（紧凑卡片）──
+        instr_y = 220
+        label_font = pygame.font.Font(UI_FONT_PATH, 18)
+        card_w, card_h = 300, 135
+        draw_panel(self.screen, (cx - card_w // 2, instr_y - 8, card_w, card_h), alpha=180)
+
+        draw_text_centered(self.screen, "操作说明", (cx, instr_y + 6), label_font, TEXT_NORMAL)
+        instr_y += 28
         controls = [
-            ("W A S D / 方向键", "移动"),
+            ("WASD / 方向键", "移动"),
             ("Shift", "加速"),
             ("Space (长按蓄力)", "射击"),
             ("P / ESC", "暂停"),
         ]
-        instr_y = 280
-        label_font = pygame.font.Font(UI_FONT_PATH, 18)
-        # 标题行
-        instr_title = font_text.render("— 操作说明 —", True, WHITE)
-        self.screen.blit(instr_title, instr_title.get_rect(center=(cx, instr_y)))
-        instr_y += 30
-
         for key_name, action in controls:
-            line = font_text.render(f"{key_name}  →  {action}", True, (200, 200, 200))
+            line = label_font.render(f"{key_name}  →  {action}", True, TEXT_DIM)
             self.screen.blit(line, line.get_rect(center=(cx, instr_y)))
-            instr_y += 26
+            instr_y += 24
 
-        # 排行榜（右侧面板）
-        self._draw_leaderboard_panel(instr_y)
+        # ── 排行榜（右侧面板）──
+        self._draw_leaderboard_panel(instr_y + 10)
 
-        # 房间信息面板（左侧，始终显示）
-        self._draw_room_panel(instr_y)
+        # ── 房间信息面板（左侧）──
+        self._draw_room_panel(instr_y + 10)
 
-        # 密码输入对话框
+        # ── 密码输入对话框 ──
         if self._entering_password:
             self._draw_password_dialog(cx)
 
-        # ── 可点击按钮区域 ──
+        # ── 按钮区域 ──
         self._menu_buttons.clear()
-        btn_font = pygame.font.Font(UI_FONT_PATH, 26)
-        btn_y = 540
-        btn_gap = 44
-        btn_w, btn_h = 260, 36
-        small_font = pygame.font.Font(UI_FONT_PATH, 20)
+        btn_font = pygame.font.Font(UI_FONT_PATH, 24)
+        btn_y = 520
+        btn_gap = 42
+        btn_w, btn_h = 240, 36
 
         def _draw_btn(label: str, action: str, y_pos: int, accent: tuple):
-            r = pygame.Rect(cx - btn_w//2, y_pos, btn_w, btn_h)
+            r = pygame.Rect(cx - btn_w // 2, y_pos, btn_w, btn_h)
             hover = r.collidepoint(pygame.mouse.get_pos())
-            bg = (accent[0]//2, accent[1]//2, accent[2]//2, 180) if hover else (40, 40, 40, 150)
+            # 按钮背景
+            if hover:
+                bg = (accent[0] // 4, accent[1] // 4, accent[2] // 4, 200)
+            else:
+                bg = (20, 20, 35, 180)
             b_surf = pygame.Surface((btn_w, btn_h), pygame.SRCALPHA)
-            b_surf.fill((*bg[:3], bg[3] if len(bg)>3 else 150))
-            border_color = accent if hover else (80, 80, 80)
+            b_surf.fill(bg)
+            border_color = accent if hover else (60, 65, 85)
             pygame.draw.rect(b_surf, border_color, (0, 0, btn_w, btn_h), width=2)
-            t = btn_font.render(label, True, accent if hover else (200, 200, 200))
+            t = btn_font.render(label, True, accent if hover else TEXT_NORMAL)
             tx = (btn_w - t.get_width()) // 2
             ty = (btn_h - t.get_height()) // 2
             b_surf.blit(t, (tx, ty))
             self.screen.blit(b_surf, (r.x, r.y))
             self._menu_buttons.append((r, label, action))
 
-        _draw_btn("开始游戏", "start", btn_y, YELLOW)
+        _draw_btn("开始游戏", "start", btn_y, ACCENT_GOLD)
         btn_y += btn_gap
-        net_label = f"🔌 {'断开' if self.network.is_connected else '连接服务器 (F10)'}"
-        _draw_btn(net_label, "net", btn_y, GREEN if self.network.is_connected else GRAY)
+        net_label = f"{'断开' if self.network.is_connected else '连接服务器 (F10)'}"
+        net_color = GREEN if self.network.is_connected else TEXT_DIM
+        _draw_btn(net_label, "net", btn_y, net_color)
         btn_y += btn_gap
 
-        # 房间按钮（始终显示，未连接时灰化）
+        # 房间按钮
         room_ok = self.network.is_connected
-        room_color = CYAN if room_ok else (100, 100, 100)
+        room_color = ACCENT_CYAN if room_ok else (80, 80, 95)
         _draw_btn("创建房间 (R)", "create", btn_y, room_color)
         btn_y += btn_gap
         _draw_btn("加入房间 (J)", "join", btn_y, room_color)
         btn_y += btn_gap
 
-        # 如果已在房间中，显示准备/离开
         if self._my_room:
-            _draw_btn("准备/取消 (Y)", "ready", btn_y, YELLOW if room_ok else GRAY)
+            _draw_btn("准备/取消 (Y)", "ready", btn_y, ACCENT_GOLD if room_ok else (80, 80, 95))
             btn_y += btn_gap
-            _draw_btn("离开房间 (L)", "leave", btn_y, RED if room_ok else GRAY)
+            _draw_btn("离开房间 (L)", "leave", btn_y, RED if room_ok else (80, 80, 95))
             btn_y += btn_gap
 
         _draw_btn("退出游戏", "quit", btn_y, RED)
-        btn_y += btn_gap + 4
+        btn_y += btn_gap + 6
 
-        q_hint = label_font.render("快捷键: R=创房→输密码  J=加入  Y=准备  ESC=返回", True, GRAY)
-        self.screen.blit(q_hint, q_hint.get_rect(center=(cx, btn_y + 10)))
+        # 快捷键提示（底部，极简）
+        q_hint = label_font.render("R=创房  J=加入  Y=准备  ESC=返回", True, TEXT_DIM)
+        self.screen.blit(q_hint, q_hint.get_rect(center=(cx, btn_y + 8)))
 
-        # 配置 + 资源信息（题2/题3）
-        info_font = pygame.font.Font(UI_FONT_PATH, 12)
-        cfg_line = f"JSON: default + user | sfx {self.audio.sfx_volume:.1f} | bgm {self.audio.bgm_volume:.1f}"
-        cfg_info = info_font.render(cfg_line, True, (120, 120, 120))
-        self.screen.blit(cfg_info, cfg_info.get_rect(center=(cx, 600)))
-        # 资源缓存 + 事件统计
-        rm = ResourceManager.get_instance()
-        s = rm.get_stats()
-        eb = EventBus.get_instance()
-        es = eb.get_stats()
-        res_line = (f"res: {s['cache']['images']}img {s['cache']['sounds']}snd {s['cache']['fonts']}font"
-                    f" | events: {es['total_events']}")
-        res_info = info_font.render(res_line, True, (100, 100, 100))
-        self.screen.blit(res_info, res_info.get_rect(center=(cx, 618)))
-
-        # 版本/分数记录（如果刚结束一局）
+        # 上一局得分（如果刚结束一局）
         if self.collision.score > 0:
             prev = label_font.render(
-                f"score: {self.collision.score}", True, (150, 150, 150)
+                f"上一局得分: {self.collision.score}", True, TEXT_DIM
             )
-            self.screen.blit(prev, prev.get_rect(center=(cx, 635)))
+            self.screen.blit(prev, prev.get_rect(center=(cx, btn_y + 28)))
 
     def _draw_leaderboard_panel(self, start_y: int) -> None:
-        """在菜单右侧绘制排行榜面板。"""
+        """在菜单右侧绘制排行榜面板（带面板背景）。"""
         entries = self.leaderboard.entries
 
-        panel_x = SCREEN_WIDTH - 210
-        panel_w = 200
+        panel_x = SCREEN_WIDTH - 200
+        panel_w = 190
         panel_y = start_y - 8
         line_h = 24
         panel_h = 34 + line_h * max(len(entries), 1) + 10
 
         # 面板背景
-        panel_surf = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
-        panel_surf.fill((0, 0, 0, 100))
-        self.screen.blit(panel_surf, (panel_x, panel_y))
+        draw_panel(self.screen, (panel_x, panel_y, panel_w, panel_h), alpha=190)
 
         font_title = pygame.font.Font(UI_FONT_PATH, 20)
         font_entry = pygame.font.Font(UI_FONT_PATH, 17)
 
         # 标题
-        title = font_title.render("🏆 TOP 5", True, YELLOW)
-        self.screen.blit(title, (panel_x + 8, panel_y + 6))
+        title = font_title.render("TOP 5", True, ACCENT_GOLD)
+        self.screen.blit(title, (panel_x + 10, panel_y + 6))
 
         # 分隔线
-        line_y = panel_y + 30
-        pygame.draw.line(self.screen, (80, 80, 80),
-                        (panel_x + 8, line_y), (panel_x + panel_w - 8, line_y))
+        draw_separator(self.screen, panel_y + 30, panel_x + 10, panel_x + panel_w - 10)
 
         # 排名列表
         if entries:
+            rank_colors = {0: ACCENT_GOLD, 1: (192, 192, 192), 2: ORANGE}
             for i, entry in enumerate(entries):
-                ey = line_y + 6 + i * line_h
-                rank_colors = {0: YELLOW, 1: (200, 200, 200), 2: ORANGE}
-                rank_color = rank_colors.get(i, (140, 140, 140))
-                rank_text = f"#{i + 1}"
-                rank_surf = font_entry.render(rank_text, True, rank_color)
-                self.screen.blit(rank_surf, (panel_x + 8, ey))
-                name = entry.name[:8]
-                name_surf = font_entry.render(name, True, WHITE)
-                self.screen.blit(name_surf, (panel_x + 36, ey))
-                score_surf = font_entry.render(str(entry.score), True, CYAN)
-                score_rect = score_surf.get_rect(topright=(panel_x + panel_w - 8, ey))
+                ey = panel_y + 36 + i * line_h
+                rank_color = rank_colors.get(i, TEXT_DIM)
+                rank_surf = font_entry.render(f"#{i + 1}", True, rank_color)
+                self.screen.blit(rank_surf, (panel_x + 10, ey))
+                name_surf = font_entry.render(entry.name[:8], True, TEXT_NORMAL)
+                self.screen.blit(name_surf, (panel_x + 38, ey))
+                score_surf = font_entry.render(str(entry.score), True, ACCENT_CYAN)
+                score_rect = score_surf.get_rect(topright=(panel_x + panel_w - 10, ey))
                 self.screen.blit(score_surf, score_rect)
         else:
-            empty = font_entry.render("暂无记录", True, (120, 120, 120))
-            self.screen.blit(empty, (panel_x + 8, line_y + 8))
+            empty = font_entry.render("暂无记录", True, TEXT_DIM)
+            self.screen.blit(empty, (panel_x + 10, panel_y + 36))
 
     def _draw_password_dialog(self, cx: int) -> None:
-        """绘制密码输入对话框。"""
-        cy = SCREEN_HEIGHT // 2 - 100
+        """绘制密码输入对话框（带面板背景）。"""
+        cy = SCREEN_HEIGHT // 2 - 70
         dw, dh = 320, 140
         dx = cx - dw // 2
-        d_surf = pygame.Surface((dw, dh), pygame.SRCALPHA)
-        d_surf.fill((20, 20, 40, 230))
-        self.screen.blit(d_surf, (dx, cy))
-        pygame.draw.rect(self.screen, CYAN, (dx, cy, dw, dh), width=2)
+        draw_panel(self.screen, (dx, cy, dw, dh), bg_color=(15, 15, 35), border_color=ACCENT_CYAN, border_width=2, alpha=240)
 
         font = pygame.font.Font(UI_FONT_PATH, 22)
         small = pygame.font.Font(UI_FONT_PATH, 16)
         if self._join_target_rid:
-            title_text = f"🔑 加入房间 #{self._join_target_rid} — 输入密码"
+            title_text = f"加入房间 #{self._join_target_rid} — 输入密码"
         else:
-            title_text = "🔑 创建房间 — 输入密码"
-        t = font.render(title_text, True, YELLOW)
-        self.screen.blit(t, (dx + (dw - t.get_width()) // 2, cy + 10))
+            title_text = "创建房间 — 输入密码"
+        draw_text_centered(self.screen, title_text, (cx, cy + 20), font, ACCENT_GOLD)
 
         # 输入框
         input_w, input_h = 240, 32
         ix = cx - input_w // 2
         iy = cy + 50
-        pygame.draw.rect(self.screen, (40, 40, 40), (ix, iy, input_w, input_h))
-        pygame.draw.rect(self.screen, YELLOW, (ix, iy, input_w, input_h), width=2)
+        pygame.draw.rect(self.screen, (25, 25, 40), (ix, iy, input_w, input_h))
+        pygame.draw.rect(self.screen, ACCENT_GOLD, (ix, iy, input_w, input_h), width=2)
 
-        # 密码显示（星号）
         cursor = "|" if int(self._menu_blink * 3) % 2 == 0 else ""
         display = "*" * len(self._password_buffer) + cursor
-        t2 = font.render(display or "|", True, WHITE)
+        t2 = font.render(display or "|", True, TEXT_BRIGHT)
         self.screen.blit(t2, (ix + 8, iy + 4))
 
-        # 提示
-        h = small.render("ENTER=确认  ESC=取消  空密码=无密码", True, (160, 160, 160))
-        self.screen.blit(h, (dx + (dw - h.get_width()) // 2, cy + 100))
+        draw_text_centered(self.screen, "ENTER=确认  ESC=取消  空密码=无密码",
+                           (cx, cy + 105), small, TEXT_DIM)
 
     def _draw_room_panel(self, start_y: int) -> None:
-        """在菜单左下绘制房间面板（带背景框）。"""
+        """在菜单左下绘制房间面板（带面板背景）。"""
         panel_x = 6
-        panel_w = 300
+        panel_w = 280
         line_h = 19
         font_s = pygame.font.Font(UI_FONT_PATH, 14)
         font_h = pygame.font.Font(UI_FONT_PATH, 16)
@@ -1197,24 +1183,20 @@ class Game:
         online = self.network.is_connected
 
         # 面板背景
-        panel_h = 200
-        p_surf = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
-        p_surf.fill((0, 0, 0, 120))
-        self.screen.blit(p_surf, (panel_x, y))
-        pygame.draw.rect(self.screen, (60, 60, 60), (panel_x, y, panel_w, panel_h), width=1)
+        panel_h = 190
+        draw_panel(self.screen, (panel_x, y, panel_w, panel_h), alpha=190)
 
-        inner_x = panel_x + 8
-        title = font_h.render("🏠 多人房间", True, CYAN)
-        self.screen.blit(title, (inner_x, y + 4))
+        inner_x = panel_x + 10
+        draw_text_left(self.screen, "多人房间", (inner_x, y + 4), font_h, ACCENT_CYAN)
         y += 24
 
         # 状态
-        status = f"🟢 {self.network.status_text()}" if online else "🔴 未连接"
+        status = f"{self.network.status_text()}" if online else "未连接"
         surf = font_s.render(status, True, GREEN if online else RED)
         self.screen.blit(surf, (inner_x, y)); y += line_h
 
         if not online:
-            self.screen.blit(font_s.render("请先点「连接服务器」或按 F10", True, (150,150,150)), (inner_x, y))
+            self.screen.blit(font_s.render("点「连接服务器」或按 F10", True, TEXT_DIM), (inner_x, y))
             return
 
         # 我的房间
@@ -1224,98 +1206,118 @@ class Game:
             rid = room.get("id", "?")
             pcount = room.get("player_count", 0)
             ready_n = len(room.get("ready", []))
-            has_pwd = room.get("has_password", False)
-            lock = "🔒" if has_pwd else "🔓"
-            self.screen.blit(font_h.render(f"{lock} {rname} (#{rid})", True, YELLOW), (inner_x, y))
+            self.screen.blit(font_h.render(f"{rname} (#{rid})", True, ACCENT_GOLD), (inner_x, y))
             y += line_h
-            self.screen.blit(font_s.render(f"人数:{pcount}/8  准备:{ready_n}", True, (200,200,200)), (inner_x, y))
+            self.screen.blit(font_s.render(f"人数:{pcount}/8  准备:{ready_n}", True, TEXT_NORMAL), (inner_x, y))
             y += line_h
             ta = room.get("team_a", [])
             tb = room.get("team_b", [])
             if ta:
-                self.screen.blit(font_s.render(f"A队:{ta}", True, (100,200,255)), (inner_x, y)); y += line_h
+                self.screen.blit(font_s.render(f"A队:{ta}", True, (100, 200, 255)), (inner_x, y)); y += line_h
             if tb:
-                self.screen.blit(font_s.render(f"B队:{tb}", True, (255,140,100)), (inner_x, y)); y += line_h
+                self.screen.blit(font_s.render(f"B队:{tb}", True, (255, 140, 100)), (inner_x, y)); y += line_h
         else:
-            self.screen.blit(font_s.render("未加入房间", True, (140,140,140)), (inner_x, y)); y += line_h
+            self.screen.blit(font_s.render("未加入房间", True, TEXT_DIM), (inner_x, y)); y += line_h
 
         y += 2
-        # 房间列表
         if self._room_list:
-            self.screen.blit(font_h.render("— 可加入 —", True, (180,180,180)), (inner_x, y)); y += line_h
+            draw_text_left(self.screen, "可加入:", (inner_x, y), font_h, TEXT_NORMAL); y += line_h
             for r in self._room_list[:4]:
-                lock = "🔒" if r.get("has_password") else "🔓"
+                lock = "[锁]" if r.get("has_password") else "[ ]"
                 line = f"  {lock} #{r['id']} {r['name']} ({r['player_count']}/8)"
-                self.screen.blit(font_s.render(line, True, (160,160,160)), (inner_x, y)); y += line_h
+                self.screen.blit(font_s.render(line, True, TEXT_DIM), (inner_x, y)); y += line_h
         else:
-            self.screen.blit(font_s.render("暂无房间 (按R创建)", True, (100,100,100)), (inner_x, y)); y += line_h
+            self.screen.blit(font_s.render("暂无房间 (按R创建)", True, TEXT_DIM), (inner_x, y)); y += line_h
 
         y += 4
-        self.screen.blit(font_s.render("R=创建  J=加入  Y/SPACE=准备  双方准备→自动开始", True, (120,255,120)), (inner_x, y))
+        self.screen.blit(font_s.render("R=创建  J=加入  Y/SPACE=准备", True, (100, 200, 100)), (inner_x, y))
 
     # ================================================================
     # 暂停遮罩
     # ================================================================
 
     def _draw_pause_overlay(self) -> None:
-        """绘制暂停遮罩"""
+        """绘制暂停遮罩（带居中卡片）"""
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 150))
+        overlay.fill((0, 0, 0, 160))
         self.screen.blit(overlay, (0, 0))
 
         cx, cy = SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2
 
-        font_big = pygame.font.Font(UI_FONT_PATH, 48)
-        font_mid = pygame.font.Font(UI_FONT_PATH, 24)
-        font_sml = pygame.font.Font(UI_FONT_PATH, 20)
+        # 居中卡片
+        card_w, card_h = 300, 180
+        draw_panel(self.screen, (cx - card_w // 2, cy - card_h // 2, card_w, card_h),
+                   bg_color=(15, 15, 30), border_color=PANEL_BORDER_LIGHT, border_width=2, alpha=240)
 
-        title = font_big.render("游戏暂停", True, WHITE)
-        self.screen.blit(title, title.get_rect(center=(cx, cy - 60)))
+        font_big = pygame.font.Font(UI_FONT_PATH, 44)
+        font_mid = pygame.font.Font(UI_FONT_PATH, 22)
+        font_sml = pygame.font.Font(UI_FONT_PATH, 18)
 
-        resume = font_mid.render("按 P / ESC  继续游戏", True, GREEN)
-        self.screen.blit(resume, resume.get_rect(center=(cx, cy + 10)))
+        draw_text_centered(self.screen, "游戏暂停", (cx, cy - 40), font_big,
+                           TEXT_BRIGHT, shadow=True, shadow_color=(0, 0, 0))
 
-        quit_menu = font_sml.render("按 Q  返回主菜单", True, ORANGE)
-        self.screen.blit(quit_menu, quit_menu.get_rect(center=(cx, cy + 48)))
+        # 分隔线
+        draw_separator(self.screen, cy - 6, cx - 100, cx + 100, PANEL_BORDER_LIGHT)
+
+        draw_text_centered(self.screen, "按 P / ESC  继续游戏", (cx, cy + 20), font_mid, GREEN)
+        draw_text_centered(self.screen, "按 Q  返回主菜单", (cx, cy + 52), font_sml, ORANGE)
 
     # ================================================================
     # 游戏结束画面
     # ================================================================
 
     def _draw_game_over(self) -> None:
-        """绘制半透明游戏结束画面"""
+        """绘制半透明游戏结束画面（带卡片 + 统计数据）"""
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 160))
+        overlay.fill((0, 0, 0, 170))
         self.screen.blit(overlay, (0, 0))
 
         cx = SCREEN_WIDTH // 2
-        font_big = pygame.font.Font(UI_FONT_PATH, 56)
-        font_mid = pygame.font.Font(UI_FONT_PATH, 36)
-        font_sml = pygame.font.Font(UI_FONT_PATH, 22)
+        font_big = pygame.font.Font(UI_FONT_PATH, 52)
+        font_mid = pygame.font.Font(UI_FONT_PATH, 28)
+        font_sml = pygame.font.Font(UI_FONT_PATH, 20)
 
         if self._entering_name:
             self._draw_name_entry(cx, font_big, font_mid, font_sml)
+            return
+
+        # 居中卡片
+        card_w, card_h = 360, 240
+        card_y = SCREEN_HEIGHT // 2 - card_h // 2 - 10
+        draw_panel(self.screen, (cx - card_w // 2, card_y, card_w, card_h),
+                   bg_color=(18, 10, 10), border_color=(120, 50, 50), border_width=2, alpha=240)
+
+        cy = card_y + 30
+
+        # 标题
+        draw_text_centered(self.screen, "游戏结束", (cx, cy), font_big,
+                           RED, shadow=True, shadow_color=(60, 0, 0))
+        cy += 50
+
+        # 分隔线
+        draw_separator(self.screen, cy, cx - 130, cx + 130, (100, 50, 50))
+        cy += 18
+
+        # 统计数据
+        draw_text_centered(self.screen, f"最终得分: {self.collision.score}", (cx, cy), font_mid, ACCENT_GOLD)
+        cy += 34
+        stats_font = pygame.font.Font(UI_FONT_PATH, 18)
+        draw_text_centered(self.screen, f"关卡: {self.ui.current_level}", (cx, cy), stats_font, TEXT_NORMAL)
+        cy += 26
+        draw_text_centered(self.screen, f"击毁敌机: {self.spawner.total_spawned} 架", (cx, cy), stats_font, TEXT_DIM)
+        cy += 36
+
+        # 分隔线
+        draw_separator(self.screen, cy, cx - 130, cx + 130, (100, 50, 50))
+        cy += 16
+
+        # 操作提示
+        if self.leaderboard.is_high_score(self.collision.score):
+            draw_text_centered(self.screen, "按 R  录入排行榜", (cx, cy), font_sml, GREEN)
         else:
-            # 标题
-            title = font_big.render("游戏结束", True, RED)
-            self.screen.blit(title, title.get_rect(center=(cx, SCREEN_HEIGHT // 2 - 60)))
-
-            # 分数 + 关卡
-            score_surf = font_mid.render(
-                f"最终得分: {self.collision.score}    关卡: {self.ui.current_level}",
-                True, YELLOW
-            )
-            self.screen.blit(score_surf, score_surf.get_rect(center=(cx, SCREEN_HEIGHT // 2)))
-
-            # 提示
-            if self.leaderboard.is_high_score(self.collision.score):
-                hint_r = font_sml.render("🏆 按 R  录入排行榜", True, GREEN)
-            else:
-                hint_r = font_sml.render("按 R  重新开始", True, (200, 200, 200))
-            self.screen.blit(hint_r, hint_r.get_rect(center=(cx, SCREEN_HEIGHT // 2 + 45)))
-
-            hint_esc = font_sml.render("按 ESC / Q  返回主菜单", True, (180, 180, 180))
-            self.screen.blit(hint_esc, hint_esc.get_rect(center=(cx, SCREEN_HEIGHT // 2 + 72)))
+            draw_text_centered(self.screen, "按 R  重新开始", (cx, cy), font_sml, TEXT_NORMAL)
+        cy += 28
+        draw_text_centered(self.screen, "按 ESC / Q  返回主菜单", (cx, cy), font_sml, TEXT_DIM)
 
     def _draw_name_entry(
         self,
@@ -1324,53 +1326,49 @@ class Game:
         font_mid: pygame.font.Font,
         font_sml: pygame.font.Font,
     ) -> None:
-        """绘制姓名输入界面"""
+        """绘制姓名输入界面（带卡片背景）"""
         cy = SCREEN_HEIGHT // 2
 
+        # 卡片背景
+        card_w, card_h = 340, 200
+        draw_panel(self.screen, (cx - card_w // 2, cy - 100, card_w, card_h),
+                   bg_color=(20, 15, 10), border_color=ACCENT_GOLD, border_width=2, alpha=240)
+
         # 标题
-        title = font_big.render("新纪录！", True, YELLOW)
-        self.screen.blit(title, title.get_rect(center=(cx, cy - 80)))
+        draw_text_centered(self.screen, "新纪录!", (cx, cy - 70), font_big, ACCENT_GOLD,
+                           shadow=True, shadow_color=(80, 60, 0))
 
         # 分数
-        score_surf = font_mid.render(
-            f"得分: {self.collision.score}", True, CYAN
-        )
-        self.screen.blit(score_surf, score_surf.get_rect(center=(cx, cy - 30)))
+        draw_text_centered(self.screen, f"得分: {self.collision.score}", (cx, cy - 20), font_mid, ACCENT_CYAN)
 
         # 输入提示
-        prompt = font_sml.render("请输入您的姓名：", True, WHITE)
-        self.screen.blit(prompt, prompt.get_rect(center=(cx, cy + 10)))
+        draw_text_centered(self.screen, "请输入您的姓名:", (cx, cy + 15), font_sml, TEXT_NORMAL)
 
-        # 输入框背景
-        input_w = 260
-        input_h = 36
+        # 输入框
+        input_w, input_h = 260, 36
         input_x = cx - input_w // 2
-        input_y = cy + 28
-        pygame.draw.rect(self.screen, (40, 40, 40), (input_x, input_y, input_w, input_h))
-        pygame.draw.rect(self.screen, YELLOW, (input_x, input_y, input_w, input_h), width=2)
+        input_y = cy + 32
+        pygame.draw.rect(self.screen, (25, 25, 40), (input_x, input_y, input_w, input_h))
+        pygame.draw.rect(self.screen, ACCENT_GOLD, (input_x, input_y, input_w, input_h), width=2)
 
-        # 已输入文字 + 光标
         display_text = self._name_buffer
         cursor_visible = int(self._menu_blink * 3) % 2 == 0
         if cursor_visible:
             display_text += "|"
-        text_surf = font_sml.render(display_text or "|", True, WHITE)
+        text_surf = font_sml.render(display_text or "|", True, TEXT_BRIGHT)
         text_rect = text_surf.get_rect(midleft=(input_x + 10, input_y + input_h // 2))
         self.screen.blit(text_surf, text_rect)
 
-        # 操作提示
-        hint_enter = font_sml.render("ENTER 确认    ESC 跳过", True, (180, 180, 180))
-        self.screen.blit(hint_enter, hint_enter.get_rect(center=(cx, cy + 70)))
+        draw_text_centered(self.screen, "ENTER 确认    ESC 跳过", (cx, cy + 78), font_sml, TEXT_DIM)
 
     # ================================================================
     # 通关胜利界面（题19）
     # ================================================================
 
     def _draw_victory(self) -> None:
-        """绘制通关胜利界面。"""
-        # 渐变半透明遮罩
+        """绘制通关胜利界面（带卡片 + 统计数据）。"""
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 170))
+        overlay.fill((0, 0, 0, 180))
         self.screen.blit(overlay, (0, 0))
 
         if self._entering_name:
@@ -1382,73 +1380,59 @@ class Game:
             return
 
         cx = SCREEN_WIDTH // 2
+        font_title = pygame.font.Font(UI_FONT_PATH, 48)
+        font_sub = pygame.font.Font(UI_FONT_PATH, 24)
+        font_info = pygame.font.Font(UI_FONT_PATH, 20)
+        font_hint = pygame.font.Font(UI_FONT_PATH, 22)
+        font_sml = pygame.font.Font(UI_FONT_PATH, 18)
 
-        try:
-            font_title = pygame.font.Font(UI_FONT_PATH, 52)
-            font_sub = pygame.font.Font(UI_FONT_PATH, 28)
-            font_info = pygame.font.Font(UI_FONT_PATH, 22)
-            font_hint = pygame.font.Font(UI_FONT_PATH, 24)
-            font_sml = pygame.font.Font(UI_FONT_PATH, 18)
-        except Exception:
-            font_title = pygame.font.Font(None, 52)
-            font_sub = pygame.font.Font(None, 28)
-            font_info = pygame.font.Font(None, 22)
-            font_hint = pygame.font.Font(None, 24)
-            font_sml = pygame.font.Font(None, 18)
+        # 居中卡片
+        card_w, card_h = 380, 340
+        card_y = SCREEN_HEIGHT // 2 - card_h // 2 - 10
+        draw_panel(self.screen, (cx - card_w // 2, card_y, card_w, card_h),
+                   bg_color=(15, 15, 25), border_color=ACCENT_GOLD, border_width=2, alpha=240)
 
-        cy = SCREEN_HEIGHT // 2 - 80
+        cy = card_y + 25
 
         # 标题（金色 + 脉冲缩放）
         pulse = 1.0 + 0.05 * math.sin(self._menu_blink * 3.0)
-        title = font_title.render("恭喜通关！", True, YELLOW)
+        title = font_title.render("恭喜通关!", True, ACCENT_GOLD)
         title = pygame.transform.rotozoom(title, 0, pulse)
-        self.screen.blit(title, title.get_rect(center=(cx, cy)))
+        title_rect = title.get_rect(center=(cx, cy + 10))
+        # 阴影
+        shadow = font_title.render("恭喜通关!", True, (80, 60, 0))
+        shadow = pygame.transform.rotozoom(shadow, 0, pulse)
+        self.screen.blit(shadow, shadow.get_rect(center=(cx + 2, cy + 12)))
+        self.screen.blit(title, title_rect)
+        cy += 55
 
-        cy += 70
-        subtitle = font_sub.render("— 你击败了最终 Boss —", True, CYAN)
-        self.screen.blit(subtitle, subtitle.get_rect(center=(cx, cy)))
+        draw_text_centered(self.screen, "— 你击败了最终 Boss —", (cx, cy), font_sub, ACCENT_CYAN)
+        cy += 40
 
-        cy += 50
         # 分隔线
-        pygame.draw.line(self.screen, (100, 100, 100),
-                        (cx - 160, cy), (cx + 160, cy), width=1)
+        draw_separator(self.screen, cy, cx - 140, cx + 140, ACCENT_GOLD)
+        cy += 20
 
-        cy += 30
         # 最终数据
-        score_text = font_info.render(
-            f"最终得分: {self.collision.score}", True, WHITE
-        )
-        self.screen.blit(score_text, score_text.get_rect(center=(cx, cy)))
-
-        cy += 32
-        level_text = font_info.render(
-            f"通关关卡: {self.ui.current_level}", True, (200, 200, 200)
-        )
-        self.screen.blit(level_text, level_text.get_rect(center=(cx, cy)))
-
-        cy += 32
-        kills = self.spawner.total_spawned
-        kills_text = font_info.render(
-            f"击毁敌机: {kills} 架", True, (200, 200, 200)
-        )
-        self.screen.blit(kills_text, kills_text.get_rect(center=(cx, cy)))
-
-        cy += 50
-        # 分隔线
-        pygame.draw.line(self.screen, (100, 100, 100),
-                        (cx - 160, cy), (cx + 160, cy), width=1)
-
+        draw_text_centered(self.screen, f"最终得分: {self.collision.score}", (cx, cy), font_info, ACCENT_GOLD)
         cy += 28
+        draw_text_centered(self.screen, f"通关关卡: {self.ui.current_level}", (cx, cy), font_info, TEXT_NORMAL)
+        cy += 28
+        kills = self.spawner.total_spawned
+        draw_text_centered(self.screen, f"击毁敌机: {kills} 架", (cx, cy), font_info, TEXT_NORMAL)
+        cy += 38
+
+        # 分隔线
+        draw_separator(self.screen, cy, cx - 140, cx + 140, ACCENT_GOLD)
+        cy += 18
+
         # 操作提示
         if self.leaderboard.is_high_score(self.collision.score):
-            hint_r = font_hint.render("按 R  录入排行榜", True, GREEN)
+            draw_text_centered(self.screen, "按 R  录入排行榜", (cx, cy), font_hint, GREEN)
         else:
-            hint_r = font_hint.render("按 R  再来一局", True, (200, 200, 200))
-        self.screen.blit(hint_r, hint_r.get_rect(center=(cx, cy)))
-
-        cy += 32
-        hint_esc = font_sml.render("按 ESC  返回主菜单", True, (160, 160, 160))
-        self.screen.blit(hint_esc, hint_esc.get_rect(center=(cx, cy)))
+            draw_text_centered(self.screen, "按 R  再来一局", (cx, cy), font_hint, TEXT_NORMAL)
+        cy += 28
+        draw_text_centered(self.screen, "按 ESC  返回主菜单", (cx, cy), font_sml, TEXT_DIM)
 
     # ================================================================
     # 性能测试（F2：一键生成 N 架敌机用于压测）
