@@ -1,0 +1,8 @@
+# 飞机大战 — 项目依赖
+# 安装: pip install -r requirements.txt
+
+# 游戏引擎
+pygame>=2.0
+
+# 测试框架（可选，仅运行测试时需要）
+pytest>=7.0

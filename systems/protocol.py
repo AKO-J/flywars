@@ -112,11 +112,15 @@ def _decode_sync(payload: bytes) -> dict:
     count = payload[0]
     return {"player_count": count, "raw": payload[1:]}
 
-def _encode_chat(message: str) -> bytes:
-    return message.encode("utf-8")
+def _encode_chat(message: str, channel: int = 0) -> bytes:
+    """channel: 0=全局, 1=队伍"""
+    return struct.pack("!B", channel) + message.encode("utf-8")
 
 def _decode_chat(payload: bytes) -> dict:
-    return {"message": payload.decode("utf-8")}
+    if len(payload) < 1:
+        return {"message": "", "channel": 0}
+    channel = payload[0]
+    return {"message": payload[1:].decode("utf-8"), "channel": channel}
 
 def _encode_heartbeat(is_pong: bool) -> bytes:
     return struct.pack("!?d", is_pong, time.time())
@@ -284,8 +288,9 @@ def make_hit(target_id: int, damage: int, x: float, y: float, seq: int = 0) -> M
 def make_sync(player_count: int, data: bytes = b"", seq: int = 0) -> Message:
     return Message(type=MessageType.SYNC, payload={"player_count": player_count, "data": data}, seq=seq)
 
-def make_chat(text: str, seq: int = 0) -> Message:
-    return Message(type=MessageType.CHAT, payload={"message": text}, seq=seq)
+def make_chat(text: str, channel: int = 0, seq: int = 0) -> Message:
+    """channel: 0=全局, 1=队伍"""
+    return Message(type=MessageType.CHAT, payload={"message": text, "channel": channel}, seq=seq)
 
 def make_heartbeat(is_pong: bool = False) -> Message:
     return Message(type=MessageType.HEARTBEAT, payload={"is_pong": is_pong})

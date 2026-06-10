@@ -288,6 +288,12 @@ class NetworkClient:
         print(f"[NET] send_room_ready()")
         return self.send(make_room_ready())
 
+    def send_chat(self, text: str, channel: int = 0) -> bool:
+        """发送聊天消息。channel: 0=全局, 1=队伍（题13）"""
+        from systems.protocol import make_chat
+        print(f"[NET] send_chat() → channel={'队伍' if channel else '全局'} text={text[:30]}")
+        return self.send(make_chat(text, channel=channel))
+
     # ==================================================================
     # 后台 asyncio 事件循环
     # ==================================================================
@@ -485,23 +491,43 @@ class NetworkClient:
 
             elif msg.type == MessageType.CHAT:
                 text = msg.payload.get("message", "")
-                self._log.info("Server message", text=text)
+                channel = msg.payload.get("channel", 0)
+                sender = msg.payload.get("sender", "")
+                sender_id = msg.payload.get("sender_id", 0)
+                self._log.info("Server message", text=text, channel=channel,
+                               sender=sender)
 
-                # 将来自服务器的聊天文本转换为游戏事件（通过异步事件队列）
                 try:
                     from systems.event_bus import EventBus, Event, GameEvent
-                    cmd = text.strip().upper()
-                    if cmd == "START":
-                        EventBus.get_instance().publish_async(Event(GameEvent.GAME_START, {"source": "network"}))
-                    elif cmd in ("STOP", "MENU", "GOTO_MENU"):
-                        EventBus.get_instance().publish_async(Event(GameEvent.GOTO_MENU, {"source": "network", "cmd": cmd}))
-                    elif cmd == "PAUSE":
-                        EventBus.get_instance().publish_async(Event(GameEvent.GAME_PAUSE, {"source": "network"}))
-                    elif cmd == "RESUME":
-                        EventBus.get_instance().publish_async(Event(GameEvent.GAME_RESUME, {"source": "network"}))
+
+                    # 服务器控制命令（无 sender 的系统消息）
+                    if not sender:
+                        cmd = text.strip().upper()
+                        if cmd == "START":
+                            EventBus.get_instance().publish_async(Event(GameEvent.GAME_START, {"source": "network"}))
+                        elif cmd in ("STOP", "MENU", "GOTO_MENU"):
+                            EventBus.get_instance().publish_async(Event(GameEvent.GOTO_MENU, {"source": "network", "cmd": cmd}))
+                        elif cmd == "PAUSE":
+                            EventBus.get_instance().publish_async(Event(GameEvent.GAME_PAUSE, {"source": "network"}))
+                        elif cmd == "RESUME":
+                            EventBus.get_instance().publish_async(Event(GameEvent.GAME_RESUME, {"source": "network"}))
+                        else:
+                            EventBus.get_instance().publish_async(Event(GameEvent.CONFIG_RELOADED, {"text": text, "source": "network"}))
                     else:
-                        # 其它文本也作为 CONFIG_RELOADED 类型事件传递以便调试/显示
-                        EventBus.get_instance().publish_async(Event(GameEvent.CONFIG_RELOADED, {"text": text, "source": "network"}))
+                        # 玩家聊天消息（题13）
+                        ch_label = "队伍" if channel == 1 else "全局"
+                        print(f"[NET] 💬 CHAT[{ch_label}] {sender}: {text}")
+                        EventBus.get_instance().publish_async(
+                            Event(GameEvent.CHAT_MESSAGE, {
+                                "sender": sender,
+                                "sender_id": sender_id,
+                                "message": text,
+                                "channel": channel,
+                                "source": "network",
+                            })
+                        )
+                except Exception:
+                    pass
                 except Exception:
                     pass
 
@@ -591,6 +617,18 @@ class NetworkClient:
                                damage=damage)
                 print(f"[NET] ⬇ SHOT_RESULT ← {label}  shot_seq={shot_seq}"
                       f"  damage={damage}")
+                # 发布射击反馈事件供游戏 UI 显示（题11）
+                try:
+                    from systems.event_bus import EventBus, Event, GameEvent
+                    EventBus.get_instance().publish_async(
+                        Event(GameEvent.SHOT_FEEDBACK, {
+                            "shot_seq": shot_seq,
+                            "result": result,  # 0=HIT, 1=MISS, 2=REJECT
+                            "damage": damage,
+                        })
+                    )
+                except Exception:
+                    pass
 
             elif msg.type == MessageType.ROOM_INFO:
                 subtype = msg.payload.get("subtype", "info")

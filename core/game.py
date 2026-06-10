@@ -161,6 +161,8 @@ class Game:
         self._event_bus.subscribe(GameEvent.PLAYER_MOVE, self._on_network_move, priority=80)
         self._event_bus.subscribe(GameEvent.PLAYER_SHOOT, self._on_network_shoot, priority=80)
         self._event_bus.subscribe(GameEvent.PLAYER_HIT, self._on_network_hit, priority=90)
+        self._event_bus.subscribe(GameEvent.SHOT_FEEDBACK, self._on_shot_feedback, priority=80)
+        self._event_bus.subscribe(GameEvent.CHAT_MESSAGE, self._on_chat_message, priority=80)
 
         # 订阅房间事件（网络→游戏）
         self._event_bus.subscribe(GameEvent.CONFIG_RELOADED, self._on_room_event, priority=50)
@@ -171,7 +173,25 @@ class Game:
         self._game_timer_remaining: float = 0.0
         self._battle_result: dict | None = None
         self._in_room_game: bool = False     # 是否在房间对战中
-        self._remote_player_pos: tuple[float, float] | None = None  # 对方位置
+        self._remote_player_pos: tuple[float, float] | None = None  # 对方位置（目标）
+        self._remote_display_pos: tuple[float, float] | None = None  # 对方位置（插值显示）
+        self._remote_lerp_speed: float = 10.0  # 插值速度（越大越快跟上）
+
+        # ── 射击反馈浮动文字（题11）──
+        self._shot_feedbacks: list[dict] = []  # [{text, color, timer, x, y}]
+
+        # ── 聊天系统（题13）──
+        self._chat_input_active: bool = False      # 是否正在输入聊天
+        self._chat_input_buffer: str = ""          # 当前输入文本
+        self._chat_channel: int = 0                # 0=全局, 1=队伍
+        self._chat_history: list[dict] = []        # [{sender, message, channel, time}]
+        self._chat_max_history: int = 50           # 最大历史记录数
+        self._chat_max_length: int = 100           # 消息最大长度
+        self._chat_display_timer: float = 0.0      # 最近消息后的显示计时
+        self._chat_display_duration: float = 8.0   # 无输入时消息显示时长
+        self._chat_quick_messages: list[str] = [   # 快捷消息（1-4键）
+            "GG!", "Good luck!", "Nice shot!", "Help!",
+        ]
 
         # 日志通过事件总线记录关键操作（题6）
         self._setup_event_logging()
@@ -269,6 +289,10 @@ class Game:
                     self._handle_name_text(event)
                 elif self._entering_password:
                     self._handle_password_text(event)
+                elif self._chat_input_active:
+                    # 聊天文本输入（题13）
+                    if len(self._chat_input_buffer) < self._chat_max_length:
+                        self._chat_input_buffer += event.text
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 self._handle_menu_click(event.pos)
 
@@ -300,9 +324,56 @@ class Game:
         if key == pygame.K_F7:
             _print_event_stats()
             return
-        if key == pygame.K_F8:
+        if key == pygame.K_BACKQUOTE:  # ~ 键切换日志面板
             GameLogger.get_instance().toggle_panel()
             return
+
+        # ── 聊天系统快捷键（题13）──
+        if self._chat_input_active:
+            if key == pygame.K_RETURN:
+                # 发送聊天消息
+                text = self._chat_input_buffer.strip()
+                if text and self.network.is_connected:
+                    self.network.send_chat(text, channel=self._chat_channel)
+                    # 本地也添加到历史
+                    self._add_chat_history("我", text, self._chat_channel)
+                self._chat_input_active = False
+                self._chat_input_buffer = ""
+                return
+            if key == pygame.K_ESCAPE:
+                # 取消输入
+                self._chat_input_active = False
+                self._chat_input_buffer = ""
+                return
+            if key == pygame.K_TAB:
+                # 切换频道
+                self._chat_channel = 1 - self._chat_channel
+                return
+            if key == pygame.K_BACKSPACE:
+                self._chat_input_buffer = self._chat_input_buffer[:-1]
+                return
+            return  # 聊天输入模式下拦截其他按键
+
+        # Enter 键打开聊天输入（PLAYING 或 MENU 状态）
+        if key == pygame.K_RETURN and self.state in (GameState.PLAYING, GameState.MENU):
+            self._chat_input_active = True
+            self._chat_input_buffer = ""
+            return
+        # Tab 键快速切换频道（不在输入模式时）
+        if key == pygame.K_TAB and self.state in (GameState.PLAYING, GameState.MENU):
+            self._chat_channel = 1 - self._chat_channel
+            ch = "队伍" if self._chat_channel == 1 else "全局"
+            print(f"[CHAT] 频道切换 → {ch}")
+            return
+        # 快捷消息 1-4（PLAYING 状态，连接中）
+        if self.state == GameState.PLAYING and self.network.is_connected:
+            if key in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4):
+                idx = key - pygame.K_1
+                if idx < len(self._chat_quick_messages):
+                    text = self._chat_quick_messages[idx]
+                    self.network.send_chat(text, channel=self._chat_channel)
+                    self._add_chat_history("我", text, self._chat_channel)
+                return
         if key == pygame.K_F9:
             _demo_protocol_encode_decode(self.player)
             return
@@ -579,6 +650,22 @@ class Game:
         if self._screen_shake > 0:
             self._screen_shake = max(0.0, self._screen_shake - self.dt * 20)
 
+        # ── 远程玩家位置插值平滑（题10）──
+        if (self._remote_player_pos and self._remote_display_pos
+                and self.state == GameState.PLAYING):
+            tx, ty = self._remote_player_pos
+            dx, dy = self._remote_display_pos
+            lerp_factor = min(1.0, self._remote_lerp_speed * self.dt)
+            nx = dx + (tx - dx) * lerp_factor
+            ny = dy + (ty - dy) * lerp_factor
+            self._remote_display_pos = (nx, ny)
+
+        # ── 射击反馈浮动文字更新（题11）──
+        for fb in self._shot_feedbacks:
+            fb["timer"] -= self.dt
+            fb["y"] -= 40 * self.dt  # 向上飘
+        self._shot_feedbacks = [fb for fb in self._shot_feedbacks if fb["timer"] > 0]
+
         # ---- Boss 死亡序列（题19：独立状态，即使在 GAME_OVER 也会完成） ----
         if self._boss_dying:
             self._boss_dying_timer += self.dt
@@ -819,6 +906,7 @@ class Game:
             self.screen.blit(shaken, (sx, sy))
 
         self._draw_log_panel()
+        self._draw_chat_ui()  # 聊天系统 UI（题13）
         pygame.display.flip()
 
     def _render_full(self) -> None:
@@ -849,12 +937,12 @@ class Game:
         self._draw_remote_player()
 
     def _draw_remote_player(self) -> None:
-        """在屏幕上绘制远程玩家的位置标记。"""
-        if not self._remote_player_pos:
+        """在屏幕上绘制远程玩家的位置标记（使用插值平滑位置）。"""
+        if not self._remote_display_pos:
             return
         if self.state != GameState.PLAYING:
             return
-        rx, ry = self._remote_player_pos
+        rx, ry = self._remote_display_pos
         import math, time
         t = time.time()
         # 脉冲绿圈 + 十字
@@ -863,6 +951,19 @@ class Game:
         pygame.draw.circle(self.screen, color, (int(rx), int(ry)), 14, width=2)
         pygame.draw.line(self.screen, color, (int(rx)-10, int(ry)), (int(rx)+10, int(ry)), 2)
         pygame.draw.line(self.screen, color, (int(rx), int(ry)-10), (int(rx), int(ry)+10), 2)
+
+    def _draw_shot_feedbacks(self) -> None:
+        """绘制服务器射击结果反馈浮动文字（题11）。"""
+        if not self._shot_feedbacks:
+            return
+        font = pygame.font.Font(UI_FONT_PATH, 18)
+        for fb in self._shot_feedbacks:
+            alpha = min(255, int(fb["timer"] * 255 / 1.2))
+            text_surf = font.render(fb["text"], True, fb["color"])
+            if alpha < 255:
+                text_surf.set_alpha(alpha)
+            self.screen.blit(text_surf, (int(fb["x"]) - text_surf.get_width() // 2,
+                                         int(fb["y"])))
 
     def _draw_team_hud(self) -> None:
         """绘制团队积分和倒计时（PLAYING 状态 + 房间游戏中）。"""
@@ -964,6 +1065,9 @@ class Game:
         self._draw_team_hud()
         # ── 远程玩家 ──
         self._draw_remote_player()
+
+        # ── 射击反馈浮动文字（题11）──
+        self._draw_shot_feedbacks()
 
         # 飘字区域
         ft_rects: list[pygame.Rect] = []
@@ -1682,9 +1786,19 @@ class Game:
         """处理来自网络的远程玩家移动事件 → 更新对方位置标记。"""
         if self.state != GameState.PLAYING:
             return
+        # 处理 SYNC 批量同步数据
+        sync_players = e.data.get("sync_players")
+        if sync_players:
+            for sp in sync_players:
+                self._remote_player_pos = (sp["x"], sp["y"])
+                if self._remote_display_pos is None:
+                    self._remote_display_pos = (sp["x"], sp["y"])
+            return
         x = e.data.get("x", 0)
         y = e.data.get("y", 0)
         self._remote_player_pos = (x, y)
+        if self._remote_display_pos is None:
+            self._remote_display_pos = (x, y)
 
     def _on_network_shoot(self, e: Event) -> None:
         """处理来自网络的远程玩家射击事件 → 生成子弹。"""
@@ -1710,6 +1824,117 @@ class Game:
         print(f"[GAME] 💔 网络 HIT 生效: hp={self.player.hp}/{self.player.max_hp} died={died}")
         if died:
             self.state = GameState.GAME_OVER
+
+    def _on_shot_feedback(self, e: Event) -> None:
+        """处理服务器射击结果反馈 → 显示浮动文字（题11）。"""
+        result = e.data.get("result", 1)
+        damage = e.data.get("damage", 0)
+        if result == 0:  # HIT
+            text = f"HIT +{damage}"
+            color = (255, 80, 80)
+        elif result == 2:  # REJECT
+            text = "REJECT"
+            color = (255, 200, 0)
+        else:  # MISS
+            text = "MISS"
+            color = (180, 180, 180)
+        # 在玩家位置附近显示
+        px = self.player.rect.centerx if self.player else 400
+        py = self.player.rect.top - 10 if self.player else 300
+        self._shot_feedbacks.append({
+            "text": text, "color": color,
+            "timer": 1.2, "x": px, "y": py,
+        })
+
+    # ── 聊天系统方法（题13）────────────────────────────
+
+    def _on_chat_message(self, e: Event) -> None:
+        """处理来自网络的聊天消息 → 添加到历史记录。"""
+        sender = e.data.get("sender", "???")
+        message = e.data.get("message", "")
+        channel = e.data.get("channel", 0)
+        self._add_chat_history(sender, message, channel)
+
+    def _add_chat_history(self, sender: str, message: str, channel: int) -> None:
+        """添加一条消息到聊天历史。"""
+        import time as _t
+        self._chat_history.append({
+            "sender": sender,
+            "message": message,
+            "channel": channel,
+            "time": _t.time(),
+        })
+        # 限制历史记录数量
+        if len(self._chat_history) > self._chat_max_history:
+            self._chat_history = self._chat_history[-self._chat_max_history:]
+        self._chat_display_timer = 0.0  # 重置显示计时
+
+    def _draw_chat_ui(self) -> None:
+        """绘制聊天系统 UI：消息历史 + 输入框（题13）。"""
+        sw, sh = self.screen.get_size()
+        font = pygame.font.Font(UI_FONT_PATH, 16)
+        small_font = pygame.font.Font(UI_FONT_PATH, 14)
+
+        # ── 频道标签（始终显示）──
+        ch_text = "[全局]" if self._chat_channel == 0 else "[队伍]"
+        ch_color = (100, 200, 255) if self._chat_channel == 0 else (100, 255, 150)
+        ch_surf = small_font.render(f"Chat {ch_text}", True, ch_color)
+        self.screen.blit(ch_surf, (10, sh - 22))
+
+        # 快捷消息提示
+        if self.state == GameState.PLAYING and self.network.is_connected:
+            hint = "  1:GG  2:GL  3:Nice  4:Help"
+            hint_surf = small_font.render(hint, True, (120, 120, 120))
+            self.screen.blit(hint_surf, (10 + ch_surf.get_width() + 5, sh - 22))
+
+        # ── 输入框（激活时显示）──
+        if self._chat_input_active:
+            input_h = 28
+            input_y = sh - input_h - 26
+            input_w = min(400, sw - 20)
+            # 背景
+            input_bg = pygame.Surface((input_w, input_h), pygame.SRCALPHA)
+            input_bg.fill((20, 20, 40, 220))
+            self.screen.blit(input_bg, (10, input_y))
+            pygame.draw.rect(self.screen, ch_color, (10, input_y, input_w, input_h), 1)
+            # 频道 + 文本
+            ch_prefix = f"[{'队伍' if self._chat_channel else '全局'}] "
+            display_text = ch_prefix + self._chat_input_buffer + "|"
+            text_surf = font.render(display_text, True, (255, 255, 255))
+            # 限制显示宽度
+            if text_surf.get_width() > input_w - 10:
+                text_surf = text_surf.subsurface(
+                    (text_surf.get_width() - input_w + 10, 0,
+                     input_w - 10, text_surf.get_height()))
+            self.screen.blit(text_surf, (15, input_y + 4))
+
+        # ── 消息历史（有输入框时显示更多，否则仅显示最近消息）──
+        if not self._chat_history:
+            return
+
+        # 判断是否应显示历史（输入模式 或 最近有消息）
+        self._chat_display_timer += self.dt if hasattr(self, 'dt') else 0.016
+        show_count = 8 if self._chat_input_active else 5
+        if not self._chat_input_active and self._chat_display_timer > self._chat_display_duration:
+            return  # 超时隐藏
+
+        recent = self._chat_history[-show_count:]
+        base_y = sh - 55 if self._chat_input_active else sh - 45
+        for i, msg in enumerate(reversed(recent)):
+            y = base_y - i * 20
+            if y < 10:
+                break
+            ch = msg["channel"]
+            color = (180, 220, 255) if ch == 0 else (150, 255, 200)
+            prefix = "[全]" if ch == 0 else "[队]"
+            line = f"{prefix} {msg['sender']}: {msg['message']}"
+            surf = small_font.render(line, True, color)
+            # 半透明背景
+            bg = pygame.Surface((surf.get_width() + 6, surf.get_height() + 2),
+                                pygame.SRCALPHA)
+            bg.fill((0, 0, 0, 140))
+            self.screen.blit(bg, (8, y - 1))
+            self.screen.blit(surf, (10, y))
 
     def _room_create(self, password: str = "") -> None:
         """在 MENU 状态创建房间。R=无密码, K=密码1234。"""

@@ -605,10 +605,44 @@ class GameServer:
                     await self._broadcast(msg, exclude=cid)
 
                 elif msg.type == MessageType.CHAT:
-                    self._log.info("CHAT", id=cid, text=msg.payload.get("message", ""))
-                    print(f"[Server] 💬 CHAT  id={cid}  text={msg.payload.get('message', '')}")
-                    # 广播给所有客户端
-                    await self._broadcast(msg, exclude=cid)
+                    chat_text = msg.payload.get("message", "")
+                    chat_channel = msg.payload.get("channel", 0)
+
+                    # 消息长度限制（题13）
+                    MAX_CHAT_LEN = 100
+                    if len(chat_text) > MAX_CHAT_LEN:
+                        chat_text = chat_text[:MAX_CHAT_LEN]
+                        msg = make_chat(chat_text, channel=chat_channel)
+
+                    # 注入发送者信息
+                    pname = self._players.get(cid, {}).get("name", f"Player{cid}")
+                    msg.payload["sender"] = pname
+                    msg.payload["sender_id"] = cid
+
+                    self._log.info("CHAT", id=cid, name=pname,
+                                   channel=chat_channel, text=chat_text)
+                    ch_label = "队伍" if chat_channel == 1 else "全局"
+                    print(f"[Server] 💬 CHAT[{ch_label}]  {pname}(id={cid}): {chat_text}")
+
+                    # 队伍频道：仅广播给同房间同队伍成员（题13）
+                    if chat_channel == 1:
+                        rid = self.rooms._player_room.get(cid)
+                        if rid:
+                            room = self.rooms._rooms.get(rid)
+                            if room:
+                                team = (room.team_a if cid in room.team_a
+                                        else room.team_b)
+                                data = msg.encode()
+                                for tid in team:
+                                    handler = self._clients.get(tid)
+                                    if handler and handler.alive:
+                                        try:
+                                            await write_frame(handler.writer, data)
+                                        except Exception:
+                                            pass
+                                break  # 已完成队伍广播
+                    # 全局频道或不在房间中：广播给所有客户端
+                    await self._broadcast(msg, exclude=None)
 
                 # ── 房间消息 ──
                 elif msg.type == MessageType.ROOM_CREATE:
@@ -801,7 +835,7 @@ class GameServer:
     async def _sync_loop(self) -> None:
         """定期广播 SYNC 消息，包含所有玩家的 id/x/y/hp。"""
         import struct as _struct
-        SYNC_INTERVAL = 1.0  # 每秒同步一次
+        SYNC_INTERVAL = 0.05  # 每 50ms 同步一次
 
         while self._running:
             await asyncio.sleep(SYNC_INTERVAL)

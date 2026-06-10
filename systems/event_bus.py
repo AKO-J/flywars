@@ -61,6 +61,8 @@ class GameEvent(Enum):
     RESOURCE_LOADED  = auto()
     RESOURCE_MISSING = auto()
     BOMB_TRIGGERED   = auto()
+    SHOT_FEEDBACK    = auto()   # 服务器射击结果反馈（题11）
+    CHAT_MESSAGE     = auto()   # 聊天消息（题13）
 
 
 # ==========================================================================

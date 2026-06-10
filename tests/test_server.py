@@ -4,7 +4,8 @@ Server 单元测试 — 启动、连接、断开、管理命令
 import asyncio
 import time
 import pytest
-from server.server import GameServer, read_frame, write_frame
+from server.server import GameServer
+from systems.frame_io import read_frame, write_frame
 
 
 class TestServerLifecycle:
