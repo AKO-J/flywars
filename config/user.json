@@ -1,0 +1,11 @@
+{
+"network": {
+  "server_host": "127.0.0.1",
+  "server_port": 8888,
+  "auto_connect": true
+},
+"audio": {
+"sfx_volume": 0.7,
+"bgm_volume": 0.4
+}
+} 

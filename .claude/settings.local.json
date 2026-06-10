@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m py_compile main.py)",
+      "Bash(python -m py_compile settings.py)",
+      "Bash(python -m py_compile sprites/enemy.py)",
+      "Bash(python -m py_compile systems/collision.py)",
+      "Bash(python *)",
+      "Bash(python3 *)"
+    ]
+  }
+}

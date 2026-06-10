@@ -1,0 +1,138 @@
+{
+  "_comment": "飞机大战 — 默认配置。请勿直接修改此文件，在 user.json 中覆盖。",
+
+  "window": {
+    "width": 600,
+    "height": 820,
+    "title": "飞机大战",
+    "fps": 60
+  },
+
+  "player": {
+    "speed": 5,
+    "boost_multiplier": 1.8,
+    "max_hp": 5,
+    "invincible_time": 1.5,
+    "charge_time": 0.85,
+    "width": 55,
+    "height": 57,
+    "tilt_angle": 20
+  },
+
+  "bullet": {
+    "player_speed": 500.0,
+    "player_damage": 1,
+    "player_width": 4,
+    "player_height": 14,
+    "enemy_speed": 250.0,
+    "enemy_damage": 1,
+    "enemy_width": 8,
+    "enemy_height": 8,
+    "charge_threshold_double": 0.40,
+    "charge_threshold_triple": 0.80,
+    "double_shot_spacing": 10
+  },
+
+  "enemy": {
+    "normal": {
+      "speed": 150.0,
+      "hp": 2,
+      "score": 100,
+      "width": 40,
+      "height": 40,
+      "spawn_interval": 1.5
+    },
+    "fast": {
+      "speed": 280.0,
+      "hp": 1,
+      "score": 150,
+      "width": 28,
+      "height": 28,
+      "spawn_interval": 3.5,
+      "diagonal_speed": 120.0
+    },
+    "elite": {
+      "speed": 100.0,
+      "hp": 4,
+      "score": 300,
+      "width": 44,
+      "height": 44,
+      "spawn_interval": 6.0,
+      "wave_amplitude": 80.0,
+      "wave_frequency": 2.5
+    },
+    "tracking": {
+      "speed": 180.0,
+      "hp": 3,
+      "score": 250,
+      "width": 34,
+      "height": 34,
+      "spawn_interval": 8.0
+    }
+  },
+
+  "boss": {
+    "spawn_level": 3,
+    "hp": 50,
+    "speed": 60.0,
+    "score": 1000,
+    "width": 150,
+    "height": 62,
+    "fire_interval_circle": 2.0,
+    "fire_interval_aimed": 1.5,
+    "fire_interval_spiral": 0.08,
+    "fan_count": 12,
+    "fan_angle": 110.0,
+    "fan_interval": 2.2,
+    "bullet_speed": 200.0,
+    "bullet_damage": 1,
+    "enter_duration": 2.0,
+    "patrol_margin": 60,
+    "explosion_count": 10,
+    "explosion_delay": 0.10,
+    "final_level": 9,
+    "collision_damage": 2
+  },
+
+  "difficulty": {
+    "spawn_interval_scale": 0.85,
+    "speed_scale": 1.10,
+    "hp_scale": 1.15,
+    "spawn_interval_min": 0.20
+  },
+
+  "background": {
+    "base_speed": 80.0
+  },
+
+  "audio": {
+    "sfx_volume": 0.5,
+    "bgm_volume": 0.3
+  },
+
+  "powerup": {
+    "drop_chance": 0.20,
+    "elite_drop_chance": 0.45,
+    "boss_drop_count": 3,
+    "duration": 8.0,
+    "fall_speed": 80.0,
+    "lifetime": 8.0
+  },
+
+  "ui": {
+    "floating_text_speed": 80.0,
+    "floating_text_lifetime": 1.0,
+    "level_score_base": 500,
+    "level_up_display_time": 2.0
+  },
+
+  "network": {
+    "server_host": "127.0.0.1",
+    "server_port": 8888,
+    "auto_connect": false,
+    "reconnect_base_delay": 1.0,
+    "reconnect_max_delay": 30.0,
+    "heartbeat_interval": 5.0,
+    "heartbeat_timeout": 15.0
+  }
+}
