@@ -40,9 +40,11 @@ from systems.protocol import (
     Message, MessageType, TrafficStats, HeartbeatManager,
     make_conn, make_chat, make_disconn, make_heartbeat,
     make_sync, make_shot_result, make_room_info,
+    make_team_score, make_game_timer, make_battle_end,
     HEADER_SIZE,
 )
 from systems.logger import GameLogger, LogLevel
+from systems.frame_io import read_frame, write_frame
 
 
 # ==========================================================================
@@ -58,27 +60,8 @@ CONNECTION_TIMEOUT = 30.0
 
 
 # ==========================================================================
-# 帧协议: 4B 长度前缀 + 载荷
+# 帧协议: 从 systems.frame_io 导入（read_frame / write_frame）
 # ==========================================================================
-
-async def read_frame(reader: asyncio.StreamReader) -> bytes | None:
-    """读取一帧：4B 大端长度 + 载荷。"""
-    try:
-        len_bytes = await reader.readexactly(4)
-        length = int.from_bytes(len_bytes, "big")
-        if length > 65535:
-            return None
-        payload = await reader.readexactly(length)
-        return payload
-    except (asyncio.IncompleteReadError, OSError):
-        return None
-
-
-async def write_frame(writer: asyncio.StreamWriter, data: bytes) -> None:
-    """写入一帧：4B 大端长度 + 载荷。"""
-    length = len(data).to_bytes(4, "big")
-    writer.write(length + data)
-    await writer.drain()
 
 
 # ==========================================================================
@@ -95,6 +78,7 @@ class ClientHandler:
         self.writer = writer
         self.addr = f"{addr[0]}:{addr[1]}"
         self.connected_at = time.time()
+        self.last_active = time.time()   # 最近一次收到消息的时间
         self._alive = True
 
     async def close(self, reason: str = "") -> None:
@@ -284,8 +268,9 @@ class RoomManager:
                     await write_frame(handler.writer, data)
                 except Exception:
                     pass
-        # 通过 CHAT 触发每个客户端的 GAME_START
-        go_msg = make_chat("START")
+
+        # 通过 ROOM_INFO(game_start) 触发每个客户端的 GAME_START
+        go_msg = make_room_info("game_start", {})
         go_data = go_msg.encode()
         for cid, handler in list(self._clients.items()):
             if cid in room.players and handler.alive:
@@ -494,6 +479,9 @@ class GameServer:
                     self._stats.record_error()
                     continue
 
+                # 更新活跃时间（用于心跳超时检测）
+                handler.last_active = time.time()
+
                 # ── 处理消息 ──
                 if msg.type == MessageType.CONN:
                     pname = msg.payload.get("player_name", "?")
@@ -568,21 +556,36 @@ class GameServer:
                 elif msg.type == MessageType.HIT:
                     target_id = msg.payload.get("target_id", 0)
                     damage = msg.payload.get("damage", 0)
+                    hit_x = msg.payload.get("x", 0)
+                    hit_y = msg.payload.get("y", 0)
                     self._log.info("RECV HIT", id=cid,
                                    target_id=target_id, damage=damage,
-                                   x=round(msg.payload.get("x", 0), 1),
-                                   y=round(msg.payload.get("y", 0), 1),
+                                   x=round(hit_x, 1), y=round(hit_y, 1),
                                    seq=msg.seq)
                     print(f"[Server] ⬇ RECV HIT  id={cid}  target={target_id}  "
                           f"damage={damage}  "
-                          f"x={msg.payload.get('x',0):.1f} y={msg.payload.get('y',0):.1f}  "
+                          f"x={hit_x:.1f} y={hit_y:.1f}  "
                           f"seq={msg.seq}")
+
+                    # ── 服务器端 HIT 验证（反作弊）──
+                    hit_valid, hit_reason = self._validate_hit(
+                        cid, target_id, damage, hit_x, hit_y
+                    )
+                    if not hit_valid:
+                        self._log.warning("HIT REJECTED", id=cid,
+                                          target_id=target_id,
+                                          reason=hit_reason)
+                        print(f"[Server] 🚫 HIT REJECTED  id={cid}  "
+                              f"target={target_id}  reason={hit_reason}")
+                        continue  # 不广播非法 HIT
+
                     # 更新被击中玩家的 HP
                     if target_id in self._players:
                         old_hp = self._players[target_id]["hp"]
                         self._players[target_id]["hp"] = max(0, old_hp - damage)
                         print(f"[Server] 💔 PLAYER_HIT  target={target_id}  "
-                              f"hp={old_hp}→{self._players[target_id]['hp']}  damage={damage}")
+                              f"hp={old_hp}→{self._players[target_id]['hp']}  "
+                              f"damage={damage}")
                         self._log.info("PLAYER_HIT", target_id=target_id,
                                        old_hp=old_hp,
                                        new_hp=self._players[target_id]["hp"],
@@ -615,8 +618,10 @@ class GameServer:
                         room = await self.rooms.create(name, pwd, cid)
                         print(f"[Server] 🏠 ROOM_CREATE  id={room.id}  owner={cid}  name={name}")
                         await self.rooms._push_room_info(room.id)
-                    except Exception as e:
+                    except ValueError as e:
                         print(f"[Server] ❌ ROOM_CREATE failed: {e}")
+                        err = make_room_info("error", {"message": str(e)})
+                        await write_frame(writer, err.encode())
 
                 elif msg.type == MessageType.ROOM_JOIN:
                     rid = msg.payload.get("room_id", "")
@@ -633,8 +638,10 @@ class GameServer:
                     try:
                         await self.rooms.leave(cid)
                         print(f"[Server] 🚶 ROOM_LEAVE  player={cid}")
-                    except Exception as e:
+                    except ValueError as e:
                         print(f"[Server] ❌ ROOM_LEAVE failed: {e}")
+                        err = make_room_info("error", {"message": str(e)})
+                        await write_frame(writer, err.encode())
 
                 elif msg.type == MessageType.ROOM_LIST:
                     rooms = await self.rooms.list_rooms()
@@ -648,6 +655,8 @@ class GameServer:
                         print(f"[Server] ✅ ROOM_READY toggled  player={cid}")
                     except ValueError as e:
                         print(f"[Server] ❌ ROOM_READY failed: {e}")
+                        err = make_room_info("error", {"message": str(e)})
+                        await write_frame(writer, err.encode())
 
                 elif msg.type == MessageType.DISCONN:
                     self._log.info("Client disconnected (self)", id=cid)
@@ -713,6 +722,47 @@ class GameServer:
 
         if tracker["count"] > self._shot_max_rate:
             return False, f"射速过快 ({tracker['count']}发/秒 > {self._shot_max_rate})"
+
+        return True, "ok"
+
+    # ==================================================================
+    # HIT 合法性校验（反作弊）
+    # ==================================================================
+
+    # 单次命中最大合理伤害
+    _HIT_MAX_DAMAGE: int = 50
+    # 命中的目标必须存在且存活
+    _HIT_MAX_DISTANCE: float = 600.0  # 射击者与目标最大距离(px)
+
+    def _validate_hit(self, shooter_id: int, target_id: int,
+                      damage: int, hit_x: float, hit_y: float
+                      ) -> tuple[bool, str]:
+        """校验 HIT 报告是否合理。返回 (合法?, 原因)。"""
+        # ① 不能攻击自己
+        if shooter_id == target_id:
+            return False, "攻击自己"
+
+        # ② 目标必须存在
+        target = self._players.get(target_id)
+        if target is None:
+            return False, f"目标不存在 (id={target_id})"
+
+        # ③ 目标必须存活
+        if target.get("hp", 0) <= 0:
+            return False, f"目标已死亡 (hp={target['hp']})"
+
+        # ④ 伤害合理性
+        if damage <= 0 or damage > self._HIT_MAX_DAMAGE:
+            return False, f"伤害异常 ({damage} > {self._HIT_MAX_DAMAGE})"
+
+        # ⑤ 距离检查（射击者与目标的坐标偏差）
+        shooter = self._players.get(shooter_id)
+        if shooter:
+            sx, sy = shooter.get("x", 0), shooter.get("y", 0)
+            dist = ((hit_x - sx) ** 2 + (hit_y - sy) ** 2) ** 0.5
+            if dist > self._HIT_MAX_DISTANCE:
+                return False, (f"命中距离过大 ({dist:.0f}px > "
+                               f"{self._HIT_MAX_DISTANCE:.0f})")
 
         return True, "ok"
 
@@ -786,11 +836,14 @@ class GameServer:
             for cid, handler in list(self._clients.items()):
                 if not handler.alive:
                     continue
-                # 如果没有收到任何包超过 timeout，断开
-                if now - handler.connected_at > HEARTBEAT_TIMEOUT:
-                    # 简化的超时检查：基于连接存活时间
-                    # 实际应使用 HeartbeatManager 实例（但需要存在 handler 中）
-                    pass
+                # 检查最近活跃时间，超过超时则断开
+                idle = now - handler.last_active
+                if idle > HEARTBEAT_TIMEOUT:
+                    self._log.warning("Heartbeat timeout",
+                                      id=cid, idle_sec=round(idle, 1))
+                    print(f"[Server] ⏰ HEARTBEAT TIMEOUT  id={cid}  "
+                          f"idle={idle:.1f}s")
+                    await handler.close(reason="heartbeat_timeout")
 
     # ==================================================================
     # 管理 CLI

@@ -14,6 +14,7 @@ EventBus 单例：订阅/取消订阅/发布 + 优先级 + 异步队列 + 事件
 
 from __future__ import annotations
 
+import threading
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -93,6 +94,7 @@ class EventBus:
         self._max_log: int = 200
         # 异步队列：本帧收集，下帧执行
         self._pending: list[Event] = []
+        self._pending_lock = threading.Lock()  # 保护 _pending 的线程锁
         # 统计
         self._publish_count: dict[GameEvent, int] = defaultdict(int)
 
@@ -138,13 +140,15 @@ class EventBus:
                 print(f"[EventBus] 处理器异常 ({event.type.name}): {e}")
 
     def publish_async(self, event: Event) -> None:
-        """异步发布：事件进入队列，下一帧 flush_async() 时执行。"""
-        self._pending.append(event)
+        """异步发布：事件进入队列，下一帧 flush_async() 时执行。线程安全。"""
+        with self._pending_lock:
+            self._pending.append(event)
 
     def flush_async(self) -> None:
-        """处理所有待执行的异步事件。"""
-        pending = self._pending[:]
-        self._pending.clear()
+        """处理所有待执行的异步事件。线程安全。"""
+        with self._pending_lock:
+            pending = self._pending[:]
+            self._pending.clear()
         for event in pending:
             self.publish(event)
 
@@ -169,9 +173,11 @@ class EventBus:
     def get_stats(self) -> dict:
         """返回事件统计。"""
         total = sum(self._publish_count.values())
+        with self._pending_lock:
+            pending_count = len(self._pending)
         return {
             "total_events": total,
-            "pending": len(self._pending),
+            "pending": pending_count,
             "log_size": len(self._log),
             "handler_count": sum(len(v) for v in self._handlers.values()),
             "by_type": {e.name: c for e, c in self._publish_count.items()},

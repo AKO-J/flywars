@@ -45,29 +45,12 @@ from systems.protocol import (
     HEADER_SIZE, MAGIC,
 )
 from systems.logger import GameLogger, LogLevel
+from systems.frame_io import read_frame as _read_frame, write_frame as _write_frame
 
 
 # ==========================================================================
-# 帧协议（与服务器一致：4B 长度前缀 + 载荷）
+# 帧协议: 从 systems.frame_io 导入（_read_frame / _write_frame）
 # ==========================================================================
-
-async def _read_frame(reader: asyncio.StreamReader) -> bytes | None:
-    """读取一帧：4B 大端长度 + 载荷。"""
-    try:
-        len_bytes = await reader.readexactly(4)
-        length = int.from_bytes(len_bytes, "big")
-        if length > 65535:
-            return None
-        return await reader.readexactly(length)
-    except (asyncio.IncompleteReadError, OSError):
-        return None
-
-
-async def _write_frame(writer: asyncio.StreamWriter, data: bytes) -> None:
-    """写入一帧：4B 大端长度 + 载荷。"""
-    length = len(data).to_bytes(4, "big")
-    writer.write(length + data)
-    await writer.drain()
 
 
 # ==========================================================================
@@ -366,8 +349,10 @@ class NetworkClient:
 
                 self.state = ConnectionState.CONNECTED
                 with self._lock:
+                    # 首次连接不计为重连，仅在断开后重连时递增
+                    if self._reconnect_attempt > 0:
+                        self._total_reconnects += 1
                     self._reconnect_attempt = 0
-                    self._total_reconnects += 1 if self._total_reconnects > 0 or self._total_reconnects == 0 else 0
 
                 connect_ms = (time.time() - connect_start) * 1000
                 print(f"[NET] 🟢 CONNECTED to {self.host}:{self.port} (handshake={connect_ms:.0f}ms)")
@@ -567,13 +552,33 @@ class NetworkClient:
                     pass
 
             elif msg.type == MessageType.SYNC:
-                raw_len = len(msg.payload.get("raw", b""))
+                raw_data = msg.payload.get("raw", b"")
+                player_count = msg.payload.get("player_count", 0)
                 self._log.info("RECV SYNC",
-                               player_count=msg.payload.get("player_count", 0),
-                               raw_data_len=raw_len,
+                               player_count=player_count,
+                               raw_data_len=len(raw_data),
                                seq=msg.seq)
-                print(f"[NET] ⬇ RECV SYNC ← player_count={msg.payload.get('player_count', '?')}  "
-                      f"raw_len={raw_len}B  seq={msg.seq}")
+                # 解析 SYNC 中的玩家数据（每个玩家 13B: I+f+f+B）
+                players_sync = []
+                if raw_data:
+                    offset = 0
+                    for _ in range(player_count):
+                        if offset + 13 > len(raw_data):
+                            break
+                        pid, px, py, php = struct.unpack_from("!IffB", raw_data, offset)
+                        players_sync.append({"id": pid, "x": px, "y": py, "hp": php})
+                        offset += 13
+                print(f"[NET] ⬇ RECV SYNC ← players={len(players_sync)}  seq={msg.seq}")
+                # 将解析后的同步数据发布到事件总线
+                if players_sync:
+                    try:
+                        from systems.event_bus import EventBus, Event, GameEvent
+                        EventBus.get_instance().publish_async(
+                            Event(GameEvent.PLAYER_MOVE,
+                                  {"sync_players": players_sync, "source": "sync"})
+                        )
+                    except Exception:
+                        pass
 
             elif msg.type == MessageType.SHOT_RESULT:
                 shot_seq = msg.payload.get("shot_seq", 0)
@@ -601,6 +606,16 @@ class NetworkClient:
                         print(f"  {r['id']}: {r['name']} ({r['player_count']}/8) {'🔒' if r['has_password'] else '🔓'}")
                 elif subtype == "start":
                     print(f"[NET] 🎮 ROOM_START: teamA={data.get('team_a',[])} teamB={data.get('team_b',[])}")
+                elif subtype == "game_start":
+                    # 专用游戏开始信号（替代旧的 CHAT "START"）
+                    print(f"[NET] 🎮 GAME_START received")
+                    try:
+                        from systems.event_bus import EventBus, Event, GameEvent
+                        EventBus.get_instance().publish_async(
+                            Event(GameEvent.GAME_START, {"source": "network"})
+                        )
+                    except Exception:
+                        pass
                 elif subtype == "disband":
                     print(f"[NET] 💥 ROOM_DISBAND")
                 elif subtype == "error":
