@@ -488,8 +488,6 @@ class GameServer:
                     self._players[cid] = {"name": pname, "x": 0.0, "y": 0.0, "hp": 100}
                     self._log.info("RECV CONN", id=cid, player_name=pname,
                                    total_players=len(self._players))
-                    print(f"[Server] 🔗 RECV CONN  id={cid}  player={pname}  "
-                          f"players={len(self._players)}")
                     # 回复欢迎消息
                     welcome = make_chat(f"WELCOME {cid}")
                     await write_frame(writer, welcome.encode())
@@ -512,12 +510,9 @@ class GameServer:
                     if cid in self._players:
                         self._players[cid]["x"] = x
                         self._players[cid]["y"] = y
-                    self._log.info("RECV MOVE", id=cid,
+                    self._log.debug("RECV MOVE", id=cid,
                                    x=round(x, 1), y=round(y, 1),
-                                   dx=round(dx, 2), dy=round(dy, 2),
                                    seq=msg.seq)
-                    print(f"[Server] ⬇ RECV MOVE  id={cid}  x={x:.1f} y={y:.1f}  "
-                          f"dx={dx:.2f} dy={dy:.2f}  seq={msg.seq}")
                     # 广播给其他客户端
                     await self._broadcast(msg, exclude=cid)
 
@@ -526,19 +521,15 @@ class GameServer:
                     shot_y = msg.payload.get("y", 0)
                     charge = msg.payload.get("charge", 0)
                     shot_seq = msg.seq
-                    self._log.info("RECV SHOOT", id=cid,
+                    self._log.debug("RECV SHOOT", id=cid,
                                    x=round(shot_x, 1), y=round(shot_y, 1),
                                    charge=round(charge, 2), seq=shot_seq)
-                    print(f"[Server] ⬇ RECV SHOOT  id={cid}  "
-                          f"x={shot_x:.1f} y={shot_y:.1f}  "
-                          f"charge={charge:.2f}  seq={shot_seq}")
 
                     # ── 射击合法性校验 ──
                     valid, reject_reason = self._validate_shot(cid, shot_x, shot_y)
                     if not valid:
                         self._log.warning("SHOT REJECTED", id=cid,
                                           reason=reject_reason, seq=shot_seq)
-                        print(f"[Server] 🚫 SHOT REJECTED  id={cid}  reason={reject_reason}")
                         result_msg = make_shot_result(shot_seq, 2, 0)  # REJECT
                         raw = result_msg.encode()
                         await write_frame(writer, raw)
@@ -551,7 +542,6 @@ class GameServer:
                     raw_r = result_msg.encode()
                     await write_frame(writer, raw_r)
                     self._stats.record_send(result_msg, len(raw_r) + 4)
-                    print(f"[Server] ✅ SHOT_RESULT(HIT) → id={cid}  seq={shot_seq}")
 
                 elif msg.type == MessageType.HIT:
                     target_id = msg.payload.get("target_id", 0)
@@ -562,10 +552,6 @@ class GameServer:
                                    target_id=target_id, damage=damage,
                                    x=round(hit_x, 1), y=round(hit_y, 1),
                                    seq=msg.seq)
-                    print(f"[Server] ⬇ RECV HIT  id={cid}  target={target_id}  "
-                          f"damage={damage}  "
-                          f"x={hit_x:.1f} y={hit_y:.1f}  "
-                          f"seq={msg.seq}")
 
                     # ── 服务器端 HIT 验证（反作弊）──
                     hit_valid, hit_reason = self._validate_hit(
@@ -575,17 +561,12 @@ class GameServer:
                         self._log.warning("HIT REJECTED", id=cid,
                                           target_id=target_id,
                                           reason=hit_reason)
-                        print(f"[Server] 🚫 HIT REJECTED  id={cid}  "
-                              f"target={target_id}  reason={hit_reason}")
                         continue  # 不广播非法 HIT
 
                     # 更新被击中玩家的 HP
                     if target_id in self._players:
                         old_hp = self._players[target_id]["hp"]
                         self._players[target_id]["hp"] = max(0, old_hp - damage)
-                        print(f"[Server] 💔 PLAYER_HIT  target={target_id}  "
-                              f"hp={old_hp}→{self._players[target_id]['hp']}  "
-                              f"damage={damage}")
                         self._log.info("PLAYER_HIT", target_id=target_id,
                                        old_hp=old_hp,
                                        new_hp=self._players[target_id]["hp"],
@@ -621,8 +602,6 @@ class GameServer:
 
                     self._log.info("CHAT", id=cid, name=pname,
                                    channel=chat_channel, text=chat_text)
-                    ch_label = "队伍" if chat_channel == 1 else "全局"
-                    print(f"[Server] 💬 CHAT[{ch_label}]  {pname}(id={cid}): {chat_text}")
 
                     # 队伍频道：仅广播给同房间同队伍成员（题13）
                     if chat_channel == 1:
@@ -640,7 +619,7 @@ class GameServer:
                                             await write_frame(handler.writer, data)
                                         except Exception:
                                             pass
-                                break  # 已完成队伍广播
+                                continue  # 已完成队伍广播，跳到下一条消息
                     # 全局频道或不在房间中：广播给所有客户端
                     await self._broadcast(msg, exclude=None)
 
@@ -650,10 +629,10 @@ class GameServer:
                     pwd = msg.payload.get("password", "")
                     try:
                         room = await self.rooms.create(name, pwd, cid)
-                        print(f"[Server] 🏠 ROOM_CREATE  id={room.id}  owner={cid}  name={name}")
+                        self._log.info("ROOM_CREATE", id=room.id, owner=cid, name=name)
                         await self.rooms._push_room_info(room.id)
                     except ValueError as e:
-                        print(f"[Server] ❌ ROOM_CREATE failed: {e}")
+                        self._log.warning("ROOM_CREATE failed", error=str(e))
                         err = make_room_info("error", {"message": str(e)})
                         await write_frame(writer, err.encode())
 
@@ -662,18 +641,18 @@ class GameServer:
                     pwd = msg.payload.get("password", "")
                     try:
                         await self.rooms.join(rid, pwd, cid)
-                        print(f"[Server] 🚪 ROOM_JOIN  room={rid}  player={cid}")
+                        self._log.info("ROOM_JOIN", room=rid, player=cid)
                     except ValueError as e:
-                        print(f"[Server] ❌ ROOM_JOIN failed: {e}")
+                        self._log.warning("ROOM_JOIN failed", error=str(e))
                         err = make_room_info("error", {"message": str(e)})
                         await write_frame(writer, err.encode())
 
                 elif msg.type == MessageType.ROOM_LEAVE:
                     try:
                         await self.rooms.leave(cid)
-                        print(f"[Server] 🚶 ROOM_LEAVE  player={cid}")
+                        self._log.info("ROOM_LEAVE", player=cid)
                     except ValueError as e:
-                        print(f"[Server] ❌ ROOM_LEAVE failed: {e}")
+                        self._log.warning("ROOM_LEAVE failed", error=str(e))
                         err = make_room_info("error", {"message": str(e)})
                         await write_frame(writer, err.encode())
 
@@ -681,20 +660,19 @@ class GameServer:
                     rooms = await self.rooms.list_rooms()
                     info = make_room_info("list", {"rooms": rooms})
                     await write_frame(writer, info.encode())
-                    print(f"[Server] 📋 ROOM_LIST  sent {len(rooms)} rooms to {cid}")
+                    self._log.debug("ROOM_LIST", count=len(rooms), to=cid)
 
                 elif msg.type == MessageType.ROOM_READY:
                     try:
                         await self.rooms.toggle_ready(cid)
-                        print(f"[Server] ✅ ROOM_READY toggled  player={cid}")
+                        self._log.info("ROOM_READY", player=cid)
                     except ValueError as e:
-                        print(f"[Server] ❌ ROOM_READY failed: {e}")
+                        self._log.warning("ROOM_READY failed", error=str(e))
                         err = make_room_info("error", {"message": str(e)})
                         await write_frame(writer, err.encode())
 
                 elif msg.type == MessageType.DISCONN:
                     self._log.info("Client disconnected (self)", id=cid)
-                    print(f"[Server] 🔌 DISCONN  id={cid}")
                     break
 
         except (ConnectionResetError, BrokenPipeError, OSError):
@@ -711,8 +689,6 @@ class GameServer:
             await handler.close()
             self._log.info("Client disconnected", id=cid, addr=handler.addr,
                            remaining_players=len(self._players))
-            print(f"[Server] 🔌 Client left  id={cid}  "
-                  f"players_remaining={len(self._players)}")
 
     # ==================================================================
     # 射击合法性校验
@@ -825,8 +801,6 @@ class GameServer:
                             sent_to=sent_count,
                             excluded=exclude,
                             size=frame_size)
-            print(f"[Server] ⬆ BROADCAST {msg.type.name}  → {sent_count} client(s)  "
-                  f"size={frame_size}B  exclude={exclude}")
 
     # ==================================================================
     # 状态同步循环
@@ -836,6 +810,9 @@ class GameServer:
         """定期广播 SYNC 消息，包含所有玩家的 id/x/y/hp。"""
         import struct as _struct
         SYNC_INTERVAL = 0.05  # 每 50ms 同步一次
+        sync_count = 0
+        sync_last_log = time.time()
+        LOG_INTERVAL = 5.0  # 每 5 秒汇总输出一次
 
         while self._running:
             await asyncio.sleep(SYNC_INTERVAL)
@@ -851,11 +828,18 @@ class GameServer:
                                      int(pinfo.get("hp", 100)))
 
             sync_msg = make_sync(len(self._players), data)
-            self._log.info("BROADCAST SYNC",
-                           player_count=len(self._players),
-                           data_len=len(data))
-            print(f"[Server] ⬆ BROADCAST SYNC  players={len(self._players)}  "
-                  f"data={len(data)}B")
+            sync_count += 1
+
+            # 节流：每 5 秒汇总输出一次，避免刷屏
+            now = time.time()
+            if now - sync_last_log >= LOG_INTERVAL:
+                self._log.debug("SYNC broadcast summary",
+                                count=sync_count,
+                                player_count=len(self._players),
+                                interval_s=round(now - sync_last_log, 1))
+                sync_count = 0
+                sync_last_log = now
+
             await self._broadcast(sync_msg, exclude=None)
 
     # ==================================================================

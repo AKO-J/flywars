@@ -137,6 +137,17 @@ class NetworkClient:
         self._log = GameLogger.get_instance()
         self._ping_send_time: float = 0.0  # 最近一次 PING 发送时间（用于 RTT 计算）
 
+        # ── 高频消息日志节流（避免 print 刷屏拖慢帧率）──
+        self._sync_recv_count: int = 0
+        self._sync_recv_last_log: float = 0.0
+        self._move_recv_count: int = 0
+        self._move_recv_last_log: float = 0.0
+        self._move_send_count: int = 0
+        self._move_send_last_log: float = 0.0
+        self._shoot_send_count: int = 0
+        self._shoot_send_last_log: float = 0.0
+        self._log_throttle_interval: float = 2.0  # 汇总日志每 N 秒输出一次
+
     # ==================================================================
     # 公开属性（线程安全）
     # ==================================================================
@@ -225,8 +236,6 @@ class NetworkClient:
                               msg_type=msg.type.name,
                               has_loop=self._loop is not None,
                               has_writer=self._writer is not None)
-            print(f"[NET] send({msg.type.name}) ✗ 失败: 未连接"
-                  f" (loop={self._loop is not None}, writer={self._writer is not None})")
             return False
         self._loop.call_soon_threadsafe(
             self._schedule_send, msg
@@ -234,64 +243,57 @@ class NetworkClient:
         self._log.debug("SEND queued",
                         msg_type=msg.type.name,
                         seq=msg.seq)
-        print(f"[NET] send({msg.type.name}) ✓ 入队成功  seq={msg.seq}")
+        # 仅对低频消息打印，高频消息(MOVE/SHOOT/SYNC)由 _async_send 节流
+        if msg.type not in (MessageType.MOVE, MessageType.SHOOT):
+            print(f"[NET] send({msg.type.name}) ✓ 入队  seq={msg.seq}")
         return True
 
     def send_move(self, x: float, y: float, dx: float, dy: float) -> bool:
         from systems.protocol import make_move
         msg = make_move(x, y, dx, dy)
-        self._log.debug("send_move() called",
+        self._log.debug("send_move()",
                         x=round(x, 1), y=round(y, 1),
                         dx=round(dx, 2), dy=round(dy, 2))
-        print(f"[NET] send_move() → x={x:.1f} y={y:.1f} dx={dx:.1f} dy={dy:.1f}")
         return self.send(msg)
 
     def send_shoot(self, x: float, y: float, charge: float) -> bool:
         from systems.protocol import make_shoot
         msg = make_shoot(x, y, charge)
-        self._log.debug("send_shoot() called",
+        self._log.debug("send_shoot()",
                         x=round(x, 1), y=round(y, 1),
                         charge=round(charge, 2))
-        print(f"[NET] send_shoot() → x={x:.1f} y={y:.1f} charge={charge:.2f}")
         return self.send(msg)
 
     def send_hit(self, target_id: int, damage: int, x: float, y: float) -> bool:
         """发送命中事件到服务器。target_id: 被击中的目标 ID"""
         from systems.protocol import make_hit
         msg = make_hit(target_id, damage, x, y)
-        print(f"[NET] send_hit() → target={target_id} damage={damage} x={x:.1f} y={y:.1f}")
         return self.send(msg)
 
     # ── 房间操作 ──
     def send_room_create(self, name: str, password: str = "") -> bool:
         from systems.protocol import make_room_create
-        print(f"[NET] send_room_create() → name={name} password={'***' if password else ''}")
         return self.send(make_room_create(name, password))
 
     def send_room_join(self, room_id: str, password: str = "") -> bool:
         from systems.protocol import make_room_join
-        print(f"[NET] send_room_join() → room={room_id}")
         return self.send(make_room_join(room_id, password))
 
     def send_room_leave(self) -> bool:
         from systems.protocol import make_room_leave
-        print(f"[NET] send_room_leave()")
         return self.send(make_room_leave())
 
     def send_room_list(self) -> bool:
         from systems.protocol import make_room_list
-        print(f"[NET] send_room_list()")
         return self.send(make_room_list())
 
     def send_room_ready(self) -> bool:
         from systems.protocol import make_room_ready
-        print(f"[NET] send_room_ready()")
         return self.send(make_room_ready())
 
     def send_chat(self, text: str, channel: int = 0) -> bool:
         """发送聊天消息。channel: 0=全局, 1=队伍（题13）"""
         from systems.protocol import make_chat
-        print(f"[NET] send_chat() → channel={'队伍' if channel else '全局'} text={text[:30]}")
         return self.send(make_chat(text, channel=channel))
 
     # ==================================================================
@@ -494,7 +496,7 @@ class NetworkClient:
                 channel = msg.payload.get("channel", 0)
                 sender = msg.payload.get("sender", "")
                 sender_id = msg.payload.get("sender_id", 0)
-                self._log.info("Server message", text=text, channel=channel,
+                self._log.debug("Server message", text=text, channel=channel,
                                sender=sender)
 
                 try:
@@ -515,8 +517,6 @@ class NetworkClient:
                             EventBus.get_instance().publish_async(Event(GameEvent.CONFIG_RELOADED, {"text": text, "source": "network"}))
                     else:
                         # 玩家聊天消息（题13）
-                        ch_label = "队伍" if channel == 1 else "全局"
-                        print(f"[NET] 💬 CHAT[{ch_label}] {sender}: {text}")
                         EventBus.get_instance().publish_async(
                             Event(GameEvent.CHAT_MESSAGE, {
                                 "sender": sender,
@@ -528,18 +528,21 @@ class NetworkClient:
                         )
                 except Exception:
                     pass
-                except Exception:
-                    pass
 
             elif msg.type == MessageType.MOVE:
-                self._log.info("RECV MOVE",
+                # 高频消息：仅 debug 级别记录，定期汇总
+                self._move_recv_count += 1
+                now = time.time()
+                if now - self._move_recv_last_log >= self._log_throttle_interval:
+                    self._log.debug("RECV MOVE summary",
+                                    count=self._move_recv_count,
+                                    interval_s=round(now - self._move_recv_last_log, 1))
+                    self._move_recv_count = 0
+                    self._move_recv_last_log = now
+                self._log.debug("RECV MOVE",
                                x=round(msg.payload.get("x", 0), 1),
                                y=round(msg.payload.get("y", 0), 1),
-                               dx=round(msg.payload.get("dx", 0), 2),
-                               dy=round(msg.payload.get("dy", 0), 2),
                                seq=msg.seq)
-                print(f"[NET] ⬇ RECV MOVE ← x={msg.payload.get('x',0):.1f} y={msg.payload.get('y',0):.1f}  "
-                      f"dx={msg.payload.get('dx',0):.2f} dy={msg.payload.get('dy',0):.2f}  seq={msg.seq}")
                 try:
                     from systems.event_bus import EventBus, Event, GameEvent
                     EventBus.get_instance().publish_async(Event(GameEvent.PLAYER_MOVE, msg.payload))
@@ -547,13 +550,12 @@ class NetworkClient:
                     pass
 
             elif msg.type == MessageType.SHOOT:
-                self._log.info("RECV SHOOT",
+                # 中频消息：debug 级别
+                self._log.debug("RECV SHOOT",
                                x=round(msg.payload.get("x", 0), 1),
                                y=round(msg.payload.get("y", 0), 1),
                                charge=round(msg.payload.get("charge", 0), 2),
                                seq=msg.seq)
-                print(f"[NET] ⬇ RECV SHOOT ← x={msg.payload.get('x',0):.1f} y={msg.payload.get('y',0):.1f}  "
-                      f"charge={msg.payload.get('charge',0):.2f}  seq={msg.seq}")
                 try:
                     from systems.event_bus import EventBus, Event, GameEvent
                     EventBus.get_instance().publish_async(Event(GameEvent.PLAYER_SHOOT, msg.payload))
@@ -567,10 +569,7 @@ class NetworkClient:
                                x=round(msg.payload.get("x", 0), 1),
                                y=round(msg.payload.get("y", 0), 1),
                                seq=msg.seq)
-                print(f"[NET] ⬇ RECV HIT ← target={msg.payload.get('target_id',0)}  "
-                      f"damage={msg.payload.get('damage',0)}  "
-                      f"x={msg.payload.get('x',0):.1f} y={msg.payload.get('y',0):.1f}  seq={msg.seq}")
-                # ⚠️ BUGFIX: 原代码缺少 EventBus 发布，导致命中不掉血
+                # ⚙️ BUGFIX: 原代码缺少 EventBus 发布，导致命中不掉血
                 try:
                     from systems.event_bus import EventBus, Event, GameEvent
                     EventBus.get_instance().publish_async(Event(GameEvent.PLAYER_HIT, msg.payload))
@@ -580,10 +579,16 @@ class NetworkClient:
             elif msg.type == MessageType.SYNC:
                 raw_data = msg.payload.get("raw", b"")
                 player_count = msg.payload.get("player_count", 0)
-                self._log.info("RECV SYNC",
-                               player_count=player_count,
-                               raw_data_len=len(raw_data),
-                               seq=msg.seq)
+                # 高频消息：计数 + 节流汇总日志（每 2 秒输出一次）
+                self._sync_recv_count += 1
+                now = time.time()
+                if now - self._sync_recv_last_log >= self._log_throttle_interval:
+                    self._log.debug("RECV SYNC summary",
+                                    count=self._sync_recv_count,
+                                    player_count=player_count,
+                                    interval_s=round(now - self._sync_recv_last_log, 1))
+                    self._sync_recv_count = 0
+                    self._sync_recv_last_log = now
                 # 解析 SYNC 中的玩家数据（每个玩家 13B: I+f+f+B）
                 players_sync = []
                 if raw_data:
@@ -594,7 +599,6 @@ class NetworkClient:
                         pid, px, py, php = struct.unpack_from("!IffB", raw_data, offset)
                         players_sync.append({"id": pid, "x": px, "y": py, "hp": php})
                         offset += 13
-                print(f"[NET] ⬇ RECV SYNC ← players={len(players_sync)}  seq={msg.seq}")
                 # 将解析后的同步数据发布到事件总线
                 if players_sync:
                     try:
@@ -610,13 +614,9 @@ class NetworkClient:
                 shot_seq = msg.payload.get("shot_seq", 0)
                 result = msg.payload.get("result", 0)
                 damage = msg.payload.get("damage", 0)
-                labels = {0: "HIT ✅", 1: "MISS", 2: "REJECT 🚫"}
-                label = labels.get(result, f"UNKNOWN({result})")
                 self._log.info("RECV SHOT_RESULT",
                                shot_seq=shot_seq, result=result,
                                damage=damage)
-                print(f"[NET] ⬇ SHOT_RESULT ← {label}  shot_seq={shot_seq}"
-                      f"  damage={damage}")
                 # 发布射击反馈事件供游戏 UI 显示（题11）
                 try:
                     from systems.event_bus import EventBus, Event, GameEvent
@@ -634,19 +634,8 @@ class NetworkClient:
                 subtype = msg.payload.get("subtype", "info")
                 data = msg.payload.get("data", {})
                 self._log.info("RECV ROOM_INFO", subtype=subtype)
-                if subtype == "info":
-                    print(f"[NET] 🏠 ROOM_INFO: {data.get('player_count',0)}/8 "
-                          f"ready={len(data.get('ready',[]))}")
-                elif subtype == "list":
-                    rooms = data.get("rooms", [])
-                    print(f"[NET] 📋 ROOM_LIST: {len(rooms)} rooms")
-                    for r in rooms:
-                        print(f"  {r['id']}: {r['name']} ({r['player_count']}/8) {'🔒' if r['has_password'] else '🔓'}")
-                elif subtype == "start":
-                    print(f"[NET] 🎮 ROOM_START: teamA={data.get('team_a',[])} teamB={data.get('team_b',[])}")
-                elif subtype == "game_start":
+                if subtype == "game_start":
                     # 专用游戏开始信号（替代旧的 CHAT "START"）
-                    print(f"[NET] 🎮 GAME_START received")
                     try:
                         from systems.event_bus import EventBus, Event, GameEvent
                         EventBus.get_instance().publish_async(
@@ -654,10 +643,7 @@ class NetworkClient:
                         )
                     except Exception:
                         pass
-                elif subtype == "disband":
-                    print(f"[NET] 💥 ROOM_DISBAND")
-                elif subtype == "error":
-                    print(f"[NET] ❌ ROOM_ERROR: {data.get('message','?')}")
+                self._log.debug("ROOM_INFO detail", subtype=subtype, data=data)
                 try:
                     from systems.event_bus import EventBus, Event, GameEvent
                     EventBus.get_instance().publish_async(
@@ -670,7 +656,7 @@ class NetworkClient:
             elif msg.type == MessageType.TEAM_SCORE:
                 sa = msg.payload.get("score_a", 0)
                 sb = msg.payload.get("score_b", 0)
-                print(f"[NET] ⚔ TEAM_SCORE: A={sa} B={sb}")
+                self._log.debug("RECV TEAM_SCORE", score_a=sa, score_b=sb)
                 try:
                     from systems.event_bus import EventBus, Event, GameEvent
                     EventBus.get_instance().publish_async(
@@ -683,7 +669,7 @@ class NetworkClient:
             elif msg.type == MessageType.GAME_TIMER:
                 remaining = msg.payload.get("remaining_sec", 0)
                 total = msg.payload.get("total_sec", 120)
-                print(f"[NET] ⏱ GAME_TIMER: {remaining:.0f}s/{total:.0f}s")
+                self._log.debug("RECV GAME_TIMER", remaining=remaining, total=total)
                 try:
                     from systems.event_bus import EventBus, Event, GameEvent
                     EventBus.get_instance().publish_async(
@@ -698,9 +684,8 @@ class NetworkClient:
                 sa = msg.payload.get("score_a", 0)
                 sb = msg.payload.get("score_b", 0)
                 stats = msg.payload.get("stats", [])
-                print(f"[NET] 🏁 BATTLE_END: winner={winner} A={sa} B={sb} players={len(stats)}")
-                for s in stats:
-                    print(f"  cid={s['cid']} kills={s['kills']} deaths={s['deaths']}")
+                self._log.info("RECV BATTLE_END", winner=winner,
+                               score_a=sa, score_b=sb, players=len(stats))
                 try:
                     from systems.event_bus import EventBus, Event, GameEvent
                     EventBus.get_instance().publish_async(
@@ -766,32 +751,39 @@ class NetworkClient:
         if not self._writer:
             self._log.warning("SEND dropped: writer is None",
                               msg_type=msg.type.name, seq=msg.seq)
-            print(f"[NET] _async_send({msg.type.name}) ✗ 丢弃: writer 为空")
             return
         try:
             raw = msg.encode()
             frame_size = len(raw) + 4
             mtype = msg.type
 
-            # ── 按消息类型记录详细日志 ──
+            # ── 按消息类型记录日志（高频消息节流）──
             if mtype == MessageType.MOVE:
-                self._log.info("SEND MOVE",
+                self._move_send_count += 1
+                now = time.time()
+                if now - self._move_send_last_log >= self._log_throttle_interval:
+                    self._log.debug("SEND MOVE summary",
+                                    count=self._move_send_count,
+                                    interval_s=round(now - self._move_send_last_log, 1))
+                    self._move_send_count = 0
+                    self._move_send_last_log = now
+                self._log.debug("SEND MOVE",
                                x=round(msg.payload.get("x", 0), 1),
                                y=round(msg.payload.get("y", 0), 1),
-                               dx=round(msg.payload.get("dx", 0), 2),
-                               dy=round(msg.payload.get("dy", 0), 2),
-                               seq=msg.seq, size=frame_size)
-                print(f"[NET] ⬆ SEND MOVE → x={msg.payload.get('x',0):.1f} y={msg.payload.get('y',0):.1f}  "
-                      f"dx={msg.payload.get('dx',0):.2f} dy={msg.payload.get('dy',0):.2f}  "
-                      f"seq={msg.seq}  size={frame_size}B")
+                               seq=msg.seq)
             elif mtype == MessageType.SHOOT:
-                self._log.info("SEND SHOOT",
+                self._shoot_send_count += 1
+                now = time.time()
+                if now - self._shoot_send_last_log >= self._log_throttle_interval:
+                    self._log.debug("SEND SHOOT summary",
+                                    count=self._shoot_send_count,
+                                    interval_s=round(now - self._shoot_send_last_log, 1))
+                    self._shoot_send_count = 0
+                    self._shoot_send_last_log = now
+                self._log.debug("SEND SHOOT",
                                x=round(msg.payload.get("x", 0), 1),
                                y=round(msg.payload.get("y", 0), 1),
-                               charge=round(msg.payload.get("charge", 0), 2),
-                               seq=msg.seq, size=frame_size)
-                print(f"[NET] ⬆ SEND SHOOT → x={msg.payload.get('x',0):.1f} y={msg.payload.get('y',0):.1f}  "
-                      f"charge={msg.payload.get('charge',0):.2f}  seq={msg.seq}  size={frame_size}B")
+                               seq=msg.seq)
             elif mtype == MessageType.HIT:
                 self._log.info("SEND HIT",
                                target_id=msg.payload.get("target_id", 0),
@@ -799,19 +791,14 @@ class NetworkClient:
                                x=round(msg.payload.get("x", 0), 1),
                                y=round(msg.payload.get("y", 0), 1),
                                seq=msg.seq, size=frame_size)
-                print(f"[NET] ⬆ SEND HIT → target={msg.payload.get('target_id',0)}  "
-                      f"damage={msg.payload.get('damage',0)}  seq={msg.seq}  size={frame_size}B")
             elif mtype == MessageType.DISCONN:
                 self._log.info("SEND DISCONN",
                                reason=msg.payload.get("reason", 0),
                                seq=msg.seq, size=frame_size)
-                print(f"[NET] ⬆ SEND DISCONN → reason={msg.payload.get('reason',0)}  "
-                      f"seq={msg.seq}  size={frame_size}B")
             else:
                 self._log.debug("SEND",
                                 msg_type=mtype.name,
                                 seq=msg.seq, size=frame_size)
-                print(f"[NET] ⬆ SEND {mtype.name} → seq={msg.seq}  size={frame_size}B")
 
             await _write_frame(self._writer, raw)
             with self._lock:
@@ -820,7 +807,6 @@ class NetworkClient:
             self._log.error("SEND failed",
                             msg_type=msg.type.name, seq=msg.seq,
                             error=str(e))
-            print(f"[NET] ✗ SEND FAILED  {msg.type.name}  seq={msg.seq}  error={e}")
 
     # ==================================================================
     # 状态摘要（供 UI 使用）
