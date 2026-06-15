@@ -42,92 +42,119 @@ class BulletSource(Enum):
 
 def _create_player_bullet_single() -> pygame.Surface:
     """
-    单发子弹：蓝白能量尖晶
+    单发子弹：蓝白贯通能量束 ⭐ 增强版
     ──────────────────────────
-    菱形蓝色晶体，带白色高亮核心和淡蓝光晕
+    大尺寸（8×20）能量光柱，多层光晕+核心白热+拖尾粒子
     """
-    w, h = PLAYER_BULLET_WIDTH, PLAYER_BULLET_HEIGHT
-    surf = pygame.Surface((w + 4, h + 4), pygame.SRCALPHA)
+    w, h = 12, 24  # 比碰撞框稍大，光晕溢出的视觉效果
+    surf = pygame.Surface((w, h), pygame.SRCALPHA)
     surf.fill((0, 0, 0, 0))
-    cx, cy = (w + 4) // 2, (h + 4) // 2
+    cx, cy = w // 2, h // 2
 
-    # 外层光晕
-    for r in range(8, 4, -2):
-        alpha = 30 // (9 - r) if r > 4 else 10
-        pygame.draw.circle(surf, (60, 180, 255, alpha), (cx, cy), r)
+    # ① 外层大光晕（淡蓝辉光）
+    for r in range(12, 6, -2):
+        alpha = 18 - (12 - r) * 2
+        pygame.draw.ellipse(surf, (40, 160, 255, alpha),
+                           (cx - r, cy - r, r * 2, r * 2 + 4), width=2)
 
-    # 菱形主体
-    pts = [(cx, cy - 7), (cx + 3, cy), (cx, cy + 7), (cx - 3, cy)]
-    pygame.draw.polygon(surf, (80, 200, 255), pts)       # 外层
-    pts2 = [(cx, cy - 5), (cx + 2, cy), (cx, cy + 5), (cx - 2, cy)]
-    pygame.draw.polygon(surf, (180, 230, 255), pts2)     # 内层
-    # 核心高亮
-    pygame.draw.circle(surf, WHITE, (cx, cy - 1), 2)
+    # ② 中层能量羽流（半透明尾迹）
+    pygame.draw.ellipse(surf, (60, 180, 255, 60),
+                       (cx - 4, cy - 6, 8, 18))
+    pygame.draw.ellipse(surf, (100, 210, 255, 40),
+                       (cx - 3, cy - 4, 6, 14))
+
+    # ③ 主体光柱（亮蓝）
+    pts = [(cx - 3, 2), (cx + 3, 2), (cx + 2, h - 6), (cx - 2, h - 6)]
+    pygame.draw.polygon(surf, (60, 180, 255), pts)
+    pts2 = [(cx - 2, 4), (cx + 2, 4), (cx + 1, h - 8), (cx - 1, h - 8)]
+    pygame.draw.polygon(surf, (140, 220, 255), pts2)
+
+    # ④ 核心白热线（最亮部分）
+    pygame.draw.line(surf, (220, 240, 255), (cx, 3), (cx, h - 8), width=2)
+    pygame.draw.line(surf, WHITE, (cx, 4), (cx, h - 10), width=1)
+
+    # ⑤ 弹头高亮（顶部发光）
+    pygame.draw.circle(surf, (200, 235, 255), (cx, 4), 3)
+    pygame.draw.circle(surf, WHITE, (cx, 3), 2)
+
+    # ⑥ 尾部能量粒子（拖尾）
+    for i in range(3):
+        py = h - 5 - i * 3
+        size = 2 - i // 2
+        alpha = 80 - i * 25
+        pygame.draw.circle(surf, (80, 200, 255, alpha), (cx - 1, py), size)
+        pygame.draw.circle(surf, (80, 200, 255, alpha), (cx + 1, py), size)
 
     return surf
 
 
 def _create_player_bullet_double() -> pygame.Surface:
     """
-    双发子弹：金色双翼飞弹
+    双发子弹：金色双螺旋 ⭐ 增强版
     ──────────────────────────
-    两枚金色菱形弹头，略向外倾斜，带橙色尾迹
+    两枚金色能量弹呈螺旋排列，带橙色尾焰
     """
-    w, h = PLAYER_BULLET_WIDTH, PLAYER_BULLET_HEIGHT
-    surf = pygame.Surface((w + 8, h + 4), pygame.SRCALPHA)
+    w, h = 20, 24
+    surf = pygame.Surface((w, h), pygame.SRCALPHA)
     surf.fill((0, 0, 0, 0))
-    base_cx, cy = (w + 8) // 2, (h + 4) // 2
+    base_cx, cy = w // 2, h // 2
 
-    offsets = [-5, 5]  # 左右弹头偏移
-    for offset in offsets:
+    offsets = [-6, 6]
+    for i, offset in enumerate(offsets):
         cx = base_cx + offset
         # 光晕
-        pygame.draw.circle(surf, (255, 180, 60, 25), (cx, cy), 6)
-        # 菱形弹头
-        pts = [(cx, cy - 6), (cx + 3, cy), (cx, cy + 6), (cx - 3, cy)]
+        for r in range(8, 4, -2):
+            alpha = 20 - (8 - r) * 4
+            pygame.draw.circle(surf, (255, 200, 60, alpha), (cx, cy), r)
+        # 主体菱形
+        pts = [(cx, cy - 8), (cx + 3, cy), (cx, cy + 8), (cx - 3, cy)]
         pygame.draw.polygon(surf, (255, 200, 50), pts)
-        # 内层
-        pts2 = [(cx, cy - 4), (cx + 2, cy), (cx, cy + 4), (cx - 2, cy)]
+        pts2 = [(cx, cy - 6), (cx + 2, cy), (cx, cy + 6), (cx - 2, cy)]
         pygame.draw.polygon(surf, (255, 240, 150), pts2)
-        # 核心高亮
-        pygame.draw.circle(surf, WHITE, (cx, cy - 1), 2)
-        # 尾迹
-        pygame.draw.circle(surf, (255, 120, 0, 100), (cx, cy + 5), 2)
-
+        # 核心
+        pygame.draw.circle(surf, WHITE, (cx, cy - 2), 2)
+        # 尾迹火焰
+        flame_len = 6 + i * 2
+        for f in range(flame_len):
+            fy = cy + 7 + f * 1
+            fa = 80 - f * 12
+            fr = 2 - f // 4
+            if fr > 0 and fa > 0:
+                pygame.draw.circle(surf, (255, 120 + f * 10, 0, fa),
+                                  (cx, fy), fr)
     return surf
 
 
 def _create_player_bullet_triple() -> pygame.Surface:
     """
-    三发子弹：赤炎三叉戟
+    三发子弹：赤炎三叉戟 ⭐ 增强版
     ──────────────────────────
-    三枚红橙色火球，中间略靠前，带动态火焰尾迹
+    三枚烈火能量球，中前侧后，火焰拖尾更华丽
     """
-    w, h = 7, 9  # 略大于基础尺寸
-    surf = pygame.Surface((w + 14, h + 6), pygame.SRCALPHA)
+    w, h = 24, 26
+    surf = pygame.Surface((w, h), pygame.SRCALPHA)
     surf.fill((0, 0, 0, 0))
-    base_cx, cy = (w + 14) // 2, (h + 6) // 2
+    base_cx, cy = w // 2, h // 2
 
-    # 中间弹头（稍靠前）
-    positions = [(base_cx, cy - 8), (base_cx - 6, cy), (base_cx + 6, cy)]
-    sizes = [4, 3, 3]  # 中间大、两边小
+    positions = [(base_cx, cy - 10), (base_cx - 7, cy), (base_cx + 7, cy)]
+    sizes = [5, 4, 4]
 
     for (cx, cy_pos), size in zip(positions, sizes):
-        # 外层火焰光晕（红橙渐变）
-        for r in range(size + 4, size, -1):
-            alpha = max(10, 35 - r * 3)
-            pygame.draw.circle(surf, (255, 80, 20, alpha), (cx, cy_pos), r)
-        # 主体火球
+        # 外层火焰光晕
+        for r in range(size + 5, size, -1):
+            alpha = max(8, 40 - r * 4)
+            pygame.draw.circle(surf, (255, 60, 10, alpha), (cx, cy_pos), r + 3)
+        # 主体
         pygame.draw.circle(surf, (255, 100, 30), (cx, cy_pos), size)
         pygame.draw.circle(surf, (255, 180, 60), (cx, cy_pos), size - 1)
         # 核心白热
-        pygame.draw.circle(surf, (255, 255, 200), (cx - 1, cy_pos - 1), 2)
+        pygame.draw.circle(surf, WHITE, (cx - 1, cy_pos - 1), 2)
         # 尾焰
-        for i in range(3):
-            ty = cy_pos + size + 2 + i * 2
-            ta = max(20, 60 - i * 15)
+        for i in range(4):
+            ty = cy_pos + size + 1 + i * 2
+            ta = max(15, 70 - i * 15)
             tr = max(1, size - i)
-            pygame.draw.circle(surf, (255, 60, 0, ta), (cx, ty), tr)
+            pygame.draw.circle(surf, (255, 80 - i * 15, 0, ta), (cx, ty), tr)
 
     return surf
 

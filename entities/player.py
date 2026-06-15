@@ -19,7 +19,7 @@ from settings import (
     PLAYER_WIDTH, PLAYER_HEIGHT,
     PLAYER_SPEED, PLAYER_TILT_ANGLE, PLAYER_BOOST_MULTIPLIER,
     PLAYER_MAX_HP, PLAYER_INVINCIBLE_TIME,
-    PLAYER_CHARGE_TIME,
+    PLAYER_CHARGE_TIME, PLAYER_AUTO_FIRE_INTERVAL,
     CHARGE_THRESHOLD_DOUBLE, CHARGE_THRESHOLD_TRIPLE,
     DOUBLE_SHOT_SPACING,
     PLAYER_BULLET_DAMAGE,
@@ -114,6 +114,11 @@ class Player(pygame.sprite.DirtySprite):
         self._extra_damage: int = 0       # 额外伤害
         self._spread_upgrade: int = 0     # 额外弹幕扩散数
 
+        # ⭐ 自动连射系统
+        self._auto_fire_timer: float = 0.0
+        self._auto_fire_interval: float = PLAYER_AUTO_FIRE_INTERVAL
+        self._is_firing: bool = False     # 是否按住射击键
+
         # ================================================================
         # 输入状态标记位（KEYDOWN/KEYUP 方案）
         # ================================================================
@@ -146,6 +151,8 @@ class Player(pygame.sprite.DirtySprite):
             self._move_down_flag = True
         elif event.key == pygame.K_LSHIFT or event.key == pygame.K_RSHIFT:
             self._boost_flag = True
+        elif event.key == pygame.K_SPACE:
+            self._is_firing = True  # ⭐ 开始射击
 
     def handle_keyup(self, event: pygame.event.Event) -> None:
         """
@@ -163,6 +170,10 @@ class Player(pygame.sprite.DirtySprite):
             self._move_down_flag = False
         elif event.key == pygame.K_LSHIFT or event.key == pygame.K_RSHIFT:
             self._boost_flag = False
+        elif event.key == pygame.K_SPACE:
+            self._is_firing = False  # ⭐ 停止射击
+            # 松开空格时若有蓄力 → 发射蓄力强击
+            # (由 Game 层读取 charge_level 触发 fire_charged)
 
     # ====================================================================
     # 每帧更新
@@ -380,35 +391,16 @@ class Player(pygame.sprite.DirtySprite):
                 style=style or bullet_style,
             )
 
-        def spread_bullets(count, center_x, base_y_pos):
-            """生成 count 枚水平扩散的子弹"""
-            if count == 1:
-                return [mkbullet(center_x, base_y_pos)]
-            bullets = []
-            spacing = 7
-            start = center_x - spacing * (count - 1) / 2.0
-            for i in range(count):
-                bx = start + spacing * i
-                by_offset = abs(i - (count - 1) / 2.0) * 0.5
-                bullets.append(mkbullet(bx, base_y_pos + int(by_offset)))
-            return bullets
-
         if is_spread:
-            # 三向散射 Buff：最低三发+扩散，满蓄五发+扩散
             base_count = 5 if charge >= CHARGE_THRESHOLD_TRIPLE else 3
-            total = base_count + spread_extra
-            return spread_bullets(total, base_x, base_y)
+            return self._spread_bullets(base_count + spread_extra, base_x, base_y, mkbullet)
 
         if charge < CHARGE_THRESHOLD_DOUBLE:
-            return spread_bullets(1 + spread_extra, base_x, base_y)
-
+            return self._spread_bullets(1 + spread_extra, base_x, base_y, mkbullet)
         elif charge < CHARGE_THRESHOLD_TRIPLE:
-            total = 2 + spread_extra
-            return spread_bullets(total, base_x, base_y)
-
+            return self._spread_bullets(2 + spread_extra, base_x, base_y, mkbullet)
         else:
-            total = 3 + spread_extra
-            return spread_bullets(total, base_x, base_y)
+            return self._spread_bullets(3 + spread_extra, base_x, base_y, mkbullet)
 
     # ====================================================================
     # 蓄力进度条可视化（常驻显示，颜色分区指示等级）
@@ -536,6 +528,62 @@ class Player(pygame.sprite.DirtySprite):
             self._invincible_timer -= dt
             if self._invincible_timer < 0:
                 self._invincible_timer = 0.0
+
+    # ⭐ 自动连射
+    def update_auto_fire(self, dt: float) -> list:
+        """
+        按住空格时的自动连射逻辑。
+        每帧由 Game.update() 调用，返回本帧需要发射的子弹列表。
+        连射使用最低蓄力等级（< 40%），不影响蓄力条显示。
+        """
+        if not self._is_firing:
+            self._auto_fire_timer = 0.0
+            return []
+
+        self._auto_fire_timer += dt
+        if self._auto_fire_timer >= self._auto_fire_interval:
+            self._auto_fire_timer -= self._auto_fire_interval
+            # 自动连射 = 单发模式（使用当前蓄力但不超过单发阈值）
+            charge = self._charge_level
+            # 连射消耗蓄力：每次消耗 20% 蓄力
+            self._charge_level = max(0.0, self._charge_level - 0.15)
+            return self._fire_auto(charge)
+        return []
+
+    def _fire_auto(self, charge: float) -> list:
+        """自动连射：发射基础子弹（蓄力低于 40% 的单发模式）"""
+        active = self._active_powerups
+        pierce = PowerUpType.PIERCE in active
+        dmg_mult = 2 if PowerUpType.DOUBLE_DAMAGE in active else 1
+        is_spread = PowerUpType.TRIPLE_SPREAD in active
+        damage = (PLAYER_BULLET_DAMAGE + self._extra_damage) * dmg_mult
+        base_x = float(self.rect.centerx)
+        base_y = float(self.rect.top)
+        spread_extra = self._spread_upgrade
+
+        def mk(x, y, style="single"):
+            return Bullet.create_player_bullet(x=x, y=y, damage=damage,
+                                              piercing=pierce, style=style)
+
+        if is_spread:
+            total = 3 + spread_extra
+            return self._spread_bullets(total, base_x, base_y, mk)
+
+        return self._spread_bullets(1 + spread_extra, base_x, base_y, mk)
+
+    @staticmethod
+    def _spread_bullets(count, center_x, base_y_pos, factory):
+        """生成 count 枚水平扩散的子弹"""
+        if count <= 1:
+            return [factory(center_x, base_y_pos)]
+        spacing = 7
+        start = center_x - spacing * (count - 1) / 2.0
+        bullets = []
+        for i in range(count):
+            bx = start + spacing * i
+            by_offset = abs(i - (count - 1) / 2.0) * 0.5
+            bullets.append(factory(bx, base_y_pos + int(by_offset)))
+        return bullets
 
     # ====================================================================
     # 道具 Buff 管理（题18）

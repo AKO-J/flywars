@@ -93,12 +93,14 @@ BACKGROUND_LAYERS: list[tuple[int, int, int, float, int, int]] = [
 
 # ---------------------- 子弹设置 ---------------------- #
 # 玩家子弹速度（像素/秒，Delta-Time驱动）
-PLAYER_BULLET_SPEED: float = 500.0
+PLAYER_BULLET_SPEED: float = 550.0       # 原500 → 更快
 # 玩家子弹伤害
 PLAYER_BULLET_DAMAGE: int = 1
-# 玩家子弹尺寸（宽 × 高，像素）
-PLAYER_BULLET_WIDTH: int = 4
-PLAYER_BULLET_HEIGHT: int = 14
+# 玩家子弹尺寸（⭐ 单发子弹更大更帅）
+PLAYER_BULLET_WIDTH: int = 8             # 原4 → 加宽
+PLAYER_BULLET_HEIGHT: int = 20           # 原14 → 加长
+# 玩家自动连射间隔（秒）⭐ 新增
+PLAYER_AUTO_FIRE_INTERVAL: float = 0.18  # ≈ 5.5发/秒
 # 蓄力系统 — 进度条随时间填充，SPACE释放时按蓄力等级发射
 # 充满所需时间（秒），值越大蓄力越慢，多发射击代价越大
 PLAYER_CHARGE_TIME: float = 0.85

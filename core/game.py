@@ -475,22 +475,11 @@ class Game:
             if key in (pygame.K_p, pygame.K_ESCAPE, pygame.K_q):
                 self.state = GameState.PAUSED
                 return
-            # 射击（空格的 KEYDOWN 单次触发）
+            # ⭐ 自动连射：由 update() 中的 update_auto_fire 统一处理
+            # 空格 KEYDOWN 只设置 _is_firing 标记
             if key == pygame.K_SPACE:
-                new_bullets: list[Bullet] = self.player.fire()
-                for bullet in new_bullets:
-                    self.bullets.add(bullet)
-                    self.all_sprites.add(bullet)
+                # 由 handle_keydown 设置 _is_firing
                 self.audio.play_shoot()
-                # ── 网络同步：发送 SHOOT（仅在房间中）──
-                if self.network.is_connected and self._my_room:
-                    charge_val = float(getattr(self.player, 'charge_level',
-                                     getattr(self.player, 'charge', 0.5)))
-                    self.network.send_shoot(
-                        float(self.player.rect.centerx),
-                        float(self.player.rect.top),
-                        charge_val,
-                    )
             # 玩家移动标记
             self.player.handle_keydown(event)
 
@@ -568,6 +557,22 @@ class Game:
     def _handle_keyup(self, event: pygame.event.Event) -> None:
         if self.state == GameState.PLAYING:
             self.player.handle_keyup(event)
+            # ⭐ 松开空格 → 发射蓄力强击（如果有蓄力）
+            if event.key == pygame.K_SPACE:
+                charge = self.player.charge_level
+                if charge >= 0.40:  # 至少双发阈值
+                    new_bullets = self.player.fire()
+                    for bullet in new_bullets:
+                        self.bullets.add(bullet)
+                        self.all_sprites.add(bullet)
+                    self.audio.play_shoot()
+                    # 网络同步
+                    if self.network.is_connected and self._my_room:
+                        self.network.send_shoot(
+                            float(self.player.rect.centerx),
+                            float(self.player.rect.top),
+                            charge,
+                        )
 
     def _handle_name_input(self, event: pygame.event.Event) -> None:
         """处理姓名输入（GAME_OVER / VICTORY 子状态）。"""
@@ -740,6 +745,12 @@ class Game:
         if new_boss is not None:
             self._boss = new_boss
             self._boss.set_player(self.player)
+
+        # ⭐ 玩家自动连射
+        auto_bullets = self.player.update_auto_fire(self.dt)
+        for b in auto_bullets:
+            self.bullets.add(b)
+            self.all_sprites.add(b)
 
         # ---- Boss 弹幕 ----
         if self._boss is not None and self._boss.alive():
