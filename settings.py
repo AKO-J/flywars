@@ -41,7 +41,7 @@ FPS: int = 60
 
 # ---------------------- 字体设置 ---------------------- #
 import os
-UI_FONT_PATH: str = os.path.join(os.environ.get("WINDIR", "C:\\Windows"), "Fonts", "simhei.ttf")
+UI_FONT_PATH: str = os.path.join(os.environ.get("WINDIR", "C:\\Windows"), "Fonts", "msyh.ttc")
 
 # ---------------------- 资源路径（真实图像素材） ---------------------- #
 PLAYER_IMAGE_PATH: str = "assets/images/player.png"

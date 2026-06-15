@@ -308,7 +308,7 @@ class UISystem:
         pad = 6  # 面板内边距
 
         # ── 半透明面板背景 ──
-        panel_w, panel_h = 210, 120
+        panel_w, panel_h = 210, 140
         draw_panel(screen, (x0 - pad, y - pad, panel_w, panel_h), alpha=200)
 
         # ── 第1行：HP 条（分段式）──
@@ -349,7 +349,18 @@ class UISystem:
             life_text = f"❤️ ×{player.extra_lives}"
             life_label = self._font_small.render(life_text, True, (255, 80, 80))
             screen.blit(life_label, (x0, y))
-        y += 20
+        y += 16
+
+        # ── 火力状态（升级后显示）──
+        if player._extra_damage > 0 or player._spread_upgrade > 0:
+            parts = []
+            if player._extra_damage > 0:
+                parts.append(f"ATK+{player._extra_damage}")
+            if player._spread_upgrade > 0:
+                parts.append(f"SPD+{player._spread_upgrade}")
+            fire_text = self._font_small.render(" | ".join(parts), True, (100, 200, 255))
+            screen.blit(fire_text, (x0, y))
+        y += 4
 
         # ── 第2行：蓄力状态 ──
         charge_pct: int = int(player.charge_level * 100)
