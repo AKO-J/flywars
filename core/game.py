@@ -821,12 +821,20 @@ class Game:
                 self._screen_shake = max(self._screen_shake, 3)
             elif esize == "huge":
                 self._screen_shake = max(self._screen_shake, 8)
+            else:
+                self._screen_shake = max(self._screen_shake, 1.5)
             self.explosions.add(exp)
             self.all_sprites.add(exp)
             self._event_bus.publish_async(Event(GameEvent.ENEMY_KILLED, {
                 "is_boss": False, "size": esize,
                 "x": pos[0], "y": pos[1],
             }))
+        # ⭐ 命中火花：子弹击中敌机时的小冲击波（含屏幕震动）
+        for sx, sy, intensity in self.collision.hit_sparks:
+            spark = Explosion(sx, sy, "spark")
+            self.explosions.add(spark)
+            self.all_sprites.add(spark)
+            self._screen_shake = max(self._screen_shake, 1.0)
         # 飘字得分
         for x, y, sv in self.collision.floating_texts:
             self.ui.add_score_text(x, y, sv)

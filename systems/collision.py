@@ -57,6 +57,8 @@ class CollisionSystem:
         self.kills_this_frame: int = 0  # 本帧击杀数（供网络同步）
         # ⭐ 本局累计经验（供成长系统）
         self.xp_earned: int = 0
+        # ⭐ 命中火花位置 [(x, y, intensity), ...]
+        self.hit_sparks: list[tuple[int, int, str]] = []
 
     # ================================================================
     # 公共入口
@@ -80,6 +82,7 @@ class CollisionSystem:
         self.boss_death_positions.clear()
         self.drops.clear()
         self.kills_this_frame = 0
+        self.hit_sparks.clear()
 
         self._handle_bullet_enemy(bullets_group, enemies_group)
         self._handle_player_enemy(player, enemies_group)
@@ -96,6 +99,7 @@ class CollisionSystem:
         self.boss_death_positions.clear()
         self.drops.clear()
         self.xp_earned = 0
+        self.hit_sparks.clear()
 
     # ================================================================
     # 玩家子弹 vs 敌机
@@ -123,6 +127,9 @@ class CollisionSystem:
                         continue
                     bullet._hit_enemies.add(id(enemy))
                 killed = enemy.take_damage(bullet.damage)
+                # ⭐ 命中火花：每次命中都产生（无论是否击杀）
+                spark_size = "big" if bullet.damage >= 3 else "normal"
+                self.hit_sparks.append((bullet.rect.centerx, bullet.rect.centery, spark_size))
                 if killed:
                     self._on_enemy_killed(enemy)
             # 非穿透弹命中后销毁

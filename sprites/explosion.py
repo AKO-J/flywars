@@ -84,7 +84,7 @@ class Explosion(pygame.sprite.DirtySprite):
           帧 2-15  : 多色散射粒子向外飞溅
           帧 8-15  : 暗色尾烟消散
         """
-        size_map = {"normal": 48, "big": 72, "huge": 100}
+        size_map = {"spark": 20, "normal": 48, "big": 72, "huge": 100}
         render_size: int = size_map.get(size_name, 48)
         half: float = render_size / 2.0
         n: int = EXPLOSION_FRAME_COUNT
@@ -125,7 +125,7 @@ class Explosion(pygame.sprite.DirtySprite):
                         )
 
             # ---- 阶段3：散射粒子（全程，含颜色变化） ----
-            num_particles: int = 18 if render_size >= 72 else 14
+            num_particles: int = 18 if render_size >= 72 else (12 if render_size >= 48 else 8)
             for j in range(num_particles):
                 angle: float = j * 2.0 * math.pi / num_particles + progress * 1.3
                 dist: float = progress * half * 0.92
