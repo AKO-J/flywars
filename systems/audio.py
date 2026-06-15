@@ -51,6 +51,18 @@ class AudioSystem:
 
     SHOOT_FILE: str = os.path.join(_ASSETS_DIR, "shoot.wav")
     EXPLOSION_FILE: str = os.path.join(_ASSETS_DIR, "explosion.wav")
+    HIT_FILE: str = os.path.join(_ASSETS_DIR, "hit.wav")
+    DEATH_FILE: str = os.path.join(_ASSETS_DIR, "death.wav")
+    ENEMY_SHOOT_FILE: str = os.path.join(_ASSETS_DIR, "enemy_shoot.wav")
+    BOSS_ALERT_FILE: str = os.path.join(_ASSETS_DIR, "boss_alert.wav")
+    BOSS_HIT_FILE: str = os.path.join(_ASSETS_DIR, "boss_hit.wav")
+    BOSS_DEATH_FILE: str = os.path.join(_ASSETS_DIR, "boss_death.wav")
+    POWERUP_FILE: str = os.path.join(_ASSETS_DIR, "powerup.wav")
+    BOMB_FILE: str = os.path.join(_ASSETS_DIR, "bomb.wav")
+    LEVEL_UP_FILE: str = os.path.join(_ASSETS_DIR, "level_up.wav")
+    WAVE_START_FILE: str = os.path.join(_ASSETS_DIR, "wave_start.wav")
+    REVIVE_FILE: str = os.path.join(_ASSETS_DIR, "revive.wav")
+    MENU_SELECT_FILE: str = os.path.join(_ASSETS_DIR, "menu_select.wav")
     BGM_FILE: str = os.path.join(_ASSETS_DIR, "bgm.ogg")
 
     def __init__(self) -> None:
@@ -82,6 +94,42 @@ class AudioSystem:
         self.sfx_explosion: pygame.mixer.Sound | None = self._load_or_make(
             self.EXPLOSION_FILE, self._make_explosion, "爆炸音效"
         )
+        self.sfx_hit: pygame.mixer.Sound | None = self._load_or_make(
+            self.HIT_FILE, self._make_hit, "受伤音效"
+        )
+        self.sfx_death: pygame.mixer.Sound | None = self._load_or_make(
+            self.DEATH_FILE, self._make_death, "死亡音效"
+        )
+        self.sfx_enemy_shoot: pygame.mixer.Sound | None = self._load_or_make(
+            self.ENEMY_SHOOT_FILE, self._make_enemy_shoot, "敌机射击"
+        )
+        self.sfx_boss_alert: pygame.mixer.Sound | None = self._load_or_make(
+            self.BOSS_ALERT_FILE, self._make_boss_alert, "Boss登场"
+        )
+        self.sfx_boss_hit: pygame.mixer.Sound | None = self._load_or_make(
+            self.BOSS_HIT_FILE, self._make_boss_hit, "Boss受伤"
+        )
+        self.sfx_boss_death: pygame.mixer.Sound | None = self._load_or_make(
+            self.BOSS_DEATH_FILE, self._make_boss_death, "Boss毁灭"
+        )
+        self.sfx_powerup: pygame.mixer.Sound | None = self._load_or_make(
+            self.POWERUP_FILE, self._make_powerup, "道具拾取"
+        )
+        self.sfx_bomb: pygame.mixer.Sound | None = self._load_or_make(
+            self.BOMB_FILE, self._make_bomb, "炸弹"
+        )
+        self.sfx_level_up: pygame.mixer.Sound | None = self._load_or_make(
+            self.LEVEL_UP_FILE, self._make_level_up, "关卡过渡"
+        )
+        self.sfx_wave_start: pygame.mixer.Sound | None = self._load_or_make(
+            self.WAVE_START_FILE, self._make_wave_start, "波次提示"
+        )
+        self.sfx_revive: pygame.mixer.Sound | None = self._load_or_make(
+            self.REVIVE_FILE, self._make_revive, "复活"
+        )
+        self.sfx_menu_select: pygame.mixer.Sound | None = self._load_or_make(
+            self.MENU_SELECT_FILE, self._make_menu_select, "菜单选择"
+        )
         self._bgm: pygame.mixer.Sound | None = self._load_or_make(
             self.BGM_FILE, self._make_bgm, "背景音乐"
         )
@@ -107,6 +155,78 @@ class AudioSystem:
             return
         self.sfx_explosion.set_volume(self._sfx_volume)
         self.sfx_explosion.play()
+
+    def play_hit(self) -> None:
+        if not self._ready or self.sfx_hit is None:
+            return
+        self.sfx_hit.set_volume(self._sfx_volume)
+        self.sfx_hit.play()
+
+    def play_death(self) -> None:
+        if not self._ready or self.sfx_death is None:
+            return
+        self.sfx_death.set_volume(self._sfx_volume)
+        self.sfx_death.play()
+
+    def play_enemy_shoot(self) -> None:
+        if not self._ready or self.sfx_enemy_shoot is None:
+            return
+        self.sfx_enemy_shoot.set_volume(self._sfx_volume)
+        self.sfx_enemy_shoot.play()
+
+    def play_boss_alert(self) -> None:
+        if not self._ready or self.sfx_boss_alert is None:
+            return
+        self.sfx_boss_alert.set_volume(self._sfx_volume)
+        self.sfx_boss_alert.play()
+
+    def play_boss_hit(self) -> None:
+        if not self._ready or self.sfx_boss_hit is None:
+            return
+        self.sfx_boss_hit.set_volume(self._sfx_volume)
+        self.sfx_boss_hit.play()
+
+    def play_boss_death(self) -> None:
+        if not self._ready or self.sfx_boss_death is None:
+            return
+        self.sfx_boss_death.set_volume(self._sfx_volume)
+        self.sfx_boss_death.play()
+
+    def play_powerup(self) -> None:
+        if not self._ready or self.sfx_powerup is None:
+            return
+        self.sfx_powerup.set_volume(self._sfx_volume)
+        self.sfx_powerup.play()
+
+    def play_bomb(self) -> None:
+        if not self._ready or self.sfx_bomb is None:
+            return
+        self.sfx_bomb.set_volume(self._sfx_volume)
+        self.sfx_bomb.play()
+
+    def play_level_up(self) -> None:
+        if not self._ready or self.sfx_level_up is None:
+            return
+        self.sfx_level_up.set_volume(self._sfx_volume)
+        self.sfx_level_up.play()
+
+    def play_wave_start(self) -> None:
+        if not self._ready or self.sfx_wave_start is None:
+            return
+        self.sfx_wave_start.set_volume(self._sfx_volume)
+        self.sfx_wave_start.play()
+
+    def play_revive(self) -> None:
+        if not self._ready or self.sfx_revive is None:
+            return
+        self.sfx_revive.set_volume(self._sfx_volume)
+        self.sfx_revive.play()
+
+    def play_menu_select(self) -> None:
+        if not self._ready or self.sfx_menu_select is None:
+            return
+        self.sfx_menu_select.set_volume(self._sfx_volume)
+        self.sfx_menu_select.play()
 
     def start_bgm(self) -> None:
         """循环播放背景音乐。"""
@@ -225,11 +345,12 @@ class AudioSystem:
 
     @staticmethod
     def _samples_to_bytes(samples: list[int]) -> bytes:
-        """将样本列表转为 16-bit 立体声 PCM 字节串。"""
+        """将样本列表转为 16-bit 立体声 PCM 字节串（自动钳位）。"""
         arr = array.array('h')
         for s in samples:
-            arr.append(s)  # 左声道
-            arr.append(s)  # 右声道（同值 = 单声道居中）
+            clamped = max(-32768, min(32767, s))
+            arr.append(clamped)  # 左声道
+            arr.append(clamped)  # 右声道（同值 = 单声道居中）
         return arr.tobytes()
 
     def _make_shoot(self) -> pygame.mixer.Sound | None:
@@ -286,6 +407,197 @@ class AudioSystem:
             return pygame.mixer.Sound(buffer=self._samples_to_bytes(samples))
         except pygame.error as e:
             print(f"[Audio] 爆炸音效合成失败: {e}")
+            return None
+
+    def _make_hit(self) -> pygame.mixer.Sound | None:
+        """受伤音效 — 金属撞击声"""
+        try:
+            sr = self.SAMPLE_RATE; n = int(sr * 0.15)
+            samples = [0] * n
+            for i in range(n):
+                t = i / sr; env = math.exp(-t * 30)
+                v = math.sin(2 * math.pi * 300 * t) * env * 28000
+                v += math.sin(2 * math.pi * 600 * t) * env * 14000
+                v += (random.random() * 2 - 1) * env * 6000
+                samples[i] = int(v)
+            return pygame.mixer.Sound(buffer=self._samples_to_bytes(samples))
+        except Exception:
+            return None
+
+    def _make_death(self) -> pygame.mixer.Sound | None:
+        """死亡音效 — 音调骤降坠落"""
+        try:
+            sr = self.SAMPLE_RATE; n = int(sr * 0.6)
+            samples = [0] * n
+            freq = 400.0
+            phase = 0.0
+            for i in range(n):
+                t = i / sr; env = math.exp(-t * 4)
+                freq = 400 - 360 * (i / n)
+                phase += 2 * math.pi * freq / sr
+                v = math.sin(phase) * env * 28000
+                v += (random.random() * 2 - 1) * env * 8000
+                samples[i] = int(v)
+            return pygame.mixer.Sound(buffer=self._samples_to_bytes(samples))
+        except Exception:
+            return None
+
+    def _make_enemy_shoot(self) -> pygame.mixer.Sound | None:
+        """敌机射击"""
+        try:
+            sr = self.SAMPLE_RATE; n = int(sr * 0.1)
+            samples = [0] * n
+            for i in range(n):
+                t = i / sr; env = math.exp(-t * 40)
+                v = math.sin(2 * math.pi * 800 * t) * env * 28000
+                v += math.sin(2 * math.pi * 600 * t) * env * 11000
+                samples[i] = int(v)
+            return pygame.mixer.Sound(buffer=self._samples_to_bytes(samples))
+        except Exception:
+            return None
+
+    def _make_boss_alert(self) -> pygame.mixer.Sound | None:
+        """Boss登场 — 上升警报"""
+        try:
+            sr = self.SAMPLE_RATE; n = int(sr * 0.8)
+            samples = [0] * n
+            phase = 0.0
+            for i in range(n):
+                t = i / sr
+                env = (1 - math.exp(-t * 5)) * math.exp(-t * 1.5)
+                freq = 200 + 600 * (i / n)
+                phase += 2 * math.pi * freq / sr
+                v = math.sin(phase) * env * 20000
+                v += math.sin(2 * math.pi * 100 * t) * env * 8000
+                samples[i] = int(v)
+            return pygame.mixer.Sound(buffer=self._samples_to_bytes(samples))
+        except Exception:
+            return None
+
+    def _make_boss_hit(self) -> pygame.mixer.Sound | None:
+        """Boss受伤"""
+        try:
+            sr = self.SAMPLE_RATE; n = int(sr * 0.2)
+            samples = [0] * n
+            for i in range(n):
+                t = i / sr; env = math.exp(-t * 15)
+                v = math.sin(2 * math.pi * 60 * t) * env * 28000
+                v += (random.random() * 2 - 1) * env * 11000
+                samples[i] = int(v)
+            return pygame.mixer.Sound(buffer=self._samples_to_bytes(samples))
+        except Exception:
+            return None
+
+    def _make_boss_death(self) -> pygame.mixer.Sound | None:
+        """Boss毁灭 — 多重爆炸"""
+        try:
+            sr = self.SAMPLE_RATE; n = int(sr * 1.0)
+            samples = [0] * n
+            for i in range(n):
+                t = i / sr; env = math.exp(-t * 3)
+                p1 = math.exp(-((t - 0.05)**2) / 0.002)
+                p2 = math.exp(-((t - 0.25)**2) / 0.003) * 0.8
+                p3 = math.exp(-((t - 0.50)**2) / 0.004) * 0.6
+                noise = (random.random() * 2 - 1) * (p1 + p2 + p3) * 20000
+                low = math.sin(2 * math.pi * 50 * t) * env * 14000
+                samples[i] = int(noise + low)
+            return pygame.mixer.Sound(buffer=self._samples_to_bytes(samples))
+        except Exception:
+            return None
+
+    def _make_powerup(self) -> pygame.mixer.Sound | None:
+        """道具拾取 — 上升音阶"""
+        try:
+            sr = self.SAMPLE_RATE; n = int(sr * 0.25)
+            samples = [0] * n
+            phase = 0.0
+            for i in range(n):
+                t = i / sr; env = math.exp(-t * 12)
+                freq = 800 + 1200 * (i / n)
+                phase += 2 * math.pi * freq / sr
+                v = math.sin(phase) * env * 16000
+                v += math.sin(phase * 1.5) * env * 8000
+                samples[i] = int(v)
+            return pygame.mixer.Sound(buffer=self._samples_to_bytes(samples))
+        except Exception:
+            return None
+
+    def _make_bomb(self) -> pygame.mixer.Sound | None:
+        """炸弹 — 低频轰鸣"""
+        try:
+            sr = self.SAMPLE_RATE; n = int(sr * 0.5)
+            samples = [0] * n
+            for i in range(n):
+                t = i / sr; env = math.exp(-t * 5)
+                v = math.sin(2 * math.pi * 40 * t) * env * 28000
+                v += (random.random() * 2 - 1) * env * 16000
+                samples[i] = int(v)
+            return pygame.mixer.Sound(buffer=self._samples_to_bytes(samples))
+        except Exception:
+            return None
+
+    def _make_level_up(self) -> pygame.mixer.Sound | None:
+        """关卡过渡 — 和弦琶音"""
+        try:
+            sr = self.SAMPLE_RATE; n = int(sr * 0.6)
+            samples = [0] * n
+            for i in range(n):
+                t = i / sr; env = math.exp(-t * 3)
+                v = 0.0
+                for j, f in enumerate([262, 330, 392]):
+                    delay = j * 0.08
+                    if t > delay:
+                        lt = t - delay
+                        le = math.exp(-lt * 5)
+                        v += math.sin(2 * math.pi * f * lt) * le * 11000
+                samples[i] = int(v * math.exp(-t * 1.5))
+            return pygame.mixer.Sound(buffer=self._samples_to_bytes(samples))
+        except Exception:
+            return None
+
+    def _make_wave_start(self) -> pygame.mixer.Sound | None:
+        """波次提示 — 颤音脉冲"""
+        try:
+            sr = self.SAMPLE_RATE; n = int(sr * 0.3)
+            samples = [0] * n
+            for i in range(n):
+                t = i / sr; env = math.exp(-t * 8)
+                v = math.sin(2 * math.pi * (400 + 200 * math.sin(2 * math.pi * 20 * t)) * t)
+                samples[i] = int(v * env * 14000)
+            return pygame.mixer.Sound(buffer=self._samples_to_bytes(samples))
+        except Exception:
+            return None
+
+    def _make_revive(self) -> pygame.mixer.Sound | None:
+        """复活 — 温暖上升"""
+        try:
+            sr = self.SAMPLE_RATE; n = int(sr * 0.5)
+            samples = [0] * n
+            phase = 0.0; phase2 = 0.0
+            for i in range(n):
+                t = i / sr
+                env = (1 - math.exp(-t * 10)) * math.exp(-t * 2)
+                freq = 300 + 700 * (i / n)
+                phase += 2 * math.pi * freq / sr
+                phase2 += 2 * math.pi * freq * 0.5 / sr
+                v = math.sin(phase) * env * 14000
+                v += math.sin(phase2) * env * 8000
+                samples[i] = int(v)
+            return pygame.mixer.Sound(buffer=self._samples_to_bytes(samples))
+        except Exception:
+            return None
+
+    def _make_menu_select(self) -> pygame.mixer.Sound | None:
+        """菜单选择 — 清脆点击"""
+        try:
+            sr = self.SAMPLE_RATE; n = int(sr * 0.06)
+            samples = [0] * n
+            for i in range(n):
+                t = i / sr; env = math.exp(-t * 80)
+                v = math.sin(2 * math.pi * 1000 * t) * env * 8000
+                samples[i] = int(v)
+            return pygame.mixer.Sound(buffer=self._samples_to_bytes(samples))
+        except Exception:
             return None
 
     def _make_bgm(self) -> pygame.mixer.Sound | None:

@@ -35,15 +35,6 @@ class PowerUpType(Enum):
     PIERCE = auto()          # 穿透弹（持续8秒）
     RAPID_FIRE = auto()      # 快速蓄力（持续8秒）
 
-class FormationType(Enum):
-    """敌机编队阵型枚举"""
-    NONE = auto()      # 无阵型，随机位置（原有行为）
-    LINE = auto()      # 一字横排
-    VSHAPE = auto()    # V字楔形
-    TRIANGLE = auto()  # 正三角/倒三角
-    ARC = auto()       # 弧线排列
-    CROSS = auto()     # X形交叉
-    SURROUND = auto()  # 两侧包围
 
 # ---------------------- 帧率设置 ---------------------- #
 # 目标帧率：每秒刷新60次，保证动画流畅
@@ -215,7 +206,6 @@ BOSS_FAN_INTERVAL: float = 1.8            # 原2.2 → 更频繁
 BOSS_EXPLOSION_COUNT: int = 10      # Boss 死亡时生成爆炸数量
 BOSS_EXPLOSION_DELAY: float = 0.10  # 连续爆炸间隔（秒）
 # 通关设置（题19）
-FINAL_BOSS_LEVEL: int = 9           # 击败该关卡 Boss 后显示通关界面
 
 # ---------------------- 难度递增设置（题15 ⭐ 增强版） ---------------------- #
 # 每提升一级，生成间隔乘以该系数（<1 则敌机越来越密）
@@ -234,159 +224,17 @@ DIFFICULTY_NONLINEAR_EXP: float = 1.3
 # 生成间隔的下限（秒），防止间隔过短
 SPAWN_INTERVAL_MIN: float = 0.15                # 原0.20 → 更密集
 
-# ---------------------- 关卡波次系统（⭐ 全新设计） ---------------------- #
-# 每关由若干波次组成，清完波次出 Boss，Boss 击败进入下一关
-# 波次定义：(敌机类型, 数量) 的列表
-
-# 敌机类型别名
-from typing import Literal
-EnemyWaveType = Literal["normal", "fast", "elite", "tracking"]
-
-# ⭐ 编队阵型默认参数
-FORMATION_DEFAULTS: dict[str, dict] = {
-    "line": {
-        "spacing": 60,
-        "width": 450,
-        "entry_y": -80,
-        "angle": 0,
-    },
-    "vshape": {
-        "spacing": 55,
-        "width": 400,
-        "entry_y": -80,
-        "angle": 30,
-    },
-    "triangle": {
-        "spacing": 60,
-        "width": 400,
-        "entry_y": -100,
-        "angle": 0,
-    },
-    "arc": {
-        "spacing": 45,
-        "width": 380,
-        "entry_y": -80,
-        "angle": 150,
-    },
-    "cross": {
-        "spacing": 55,
-        "width": 400,
-        "entry_y": -80,
-        "angle": 35,
-    },
-    "surround": {
-        "spacing": 60,
-        "width": 500,
-        "entry_y": -60,
-        "angle": 25,
-    },
-}
-
-# 波次结构：每个波次可以是 [(type, count), ...]（旧格式，随机位置）
-# 或 {"units": [(type, count), ...], "formation": "...", "params": {...}}
-LEVEL_WAVES: dict[int, dict] = {
-    1: {  # 入门关 — 横排入门
-        "waves": [
-            {"units": [("normal", 3)], "formation": "line"},
-            {"units": [("normal", 4)], "formation": "line"},
-            {"units": [("normal", 3), ("fast", 1)], "formation": "vshape"},
-        ],
-        "spawn_interval": 0.9,
-        "has_boss": False,
-    },
-    2: {  # 引入快速敌机 — 三角+V形
-        "waves": [
-            {"units": [("normal", 4)], "formation": "line"},
-            {"units": [("normal", 3), ("fast", 2)], "formation": "triangle"},
-            {"units": [("normal", 4), ("fast", 2)], "formation": "vshape"},
-        ],
-        "spawn_interval": 0.8,
-        "has_boss": False,
-    },
-    3: {  # 引入精英敌机
-        "waves": [
-            {"units": [("normal", 4), ("fast", 1)], "formation": "line"},
-            {"units": [("normal", 3), ("elite", 1)], "formation": "triangle"},
-            {"units": [("normal", 4), ("fast", 3)], "formation": "vshape"},
-            {"units": [("normal", 5), ("fast", 2), ("elite", 1)], "formation": "cross"},
-        ],
-        "spawn_interval": 0.7,
-        "has_boss": False,
-    },
-    4: {  # 引入追踪敌机
-        "waves": [
-            {"units": [("normal", 4), ("fast", 2)], "formation": "line"},
-            {"units": [("normal", 3), ("fast", 2), ("tracking", 1)], "formation": "vshape"},
-            {"units": [("normal", 4), ("fast", 3), ("elite", 1)], "formation": "arc"},
-            {"units": [("normal", 5), ("fast", 3), ("tracking", 1)], "formation": "cross"},
-        ],
-        "spawn_interval": 0.65,
-        "has_boss": False,
-    },
-    5: {  # ⭐ 首个 Boss 战
-        "waves": [
-            {"units": [("normal", 5), ("fast", 2)], "formation": "line"},
-            {"units": [("normal", 3), ("fast", 3), ("elite", 1)], "formation": "vshape"},
-            {"units": [("normal", 4), ("fast", 3), ("elite", 2)], "formation": "triangle"},
-            {"units": [("normal", 6), ("fast", 3), ("tracking", 1)], "formation": "surround"},
-        ],
-        "spawn_interval": 0.6,
-        "has_boss": True,
-    },
-    6: {  # 战间期 — 混合编队
-        "waves": [
-            {"units": [("normal", 4), ("fast", 3), ("tracking", 1)], "formation": "vshape"},
-            {"units": [("normal", 3), ("fast", 2), ("elite", 2)], "formation": "cross"},
-            {"units": [("normal", 4), ("fast", 3), ("elite", 2)], "formation": "triangle"},
-            {"units": [("normal", 5), ("fast", 3), ("tracking", 2)], "formation": "arc"},
-            {"units": [("normal", 6), ("fast", 4), ("elite", 1), ("tracking", 1)], "formation": "surround"},
-        ],
-        "spawn_interval": 0.55,
-        "has_boss": False,
-    },
-    7: {  # 高密度 — 全阵型展示
-        "waves": [
-            {"units": [("normal", 6), ("fast", 3), ("tracking", 1)], "formation": "line"},
-            {"units": [("normal", 5), ("fast", 4), ("elite", 2)], "formation": "vshape"},
-            {"units": [("normal", 6), ("fast", 3), ("tracking", 2)], "formation": "triangle"},
-            {"units": [("normal", 5), ("fast", 4), ("elite", 2), ("tracking", 2)], "formation": "cross"},
-            {"units": [("normal", 8), ("fast", 5), ("elite", 2)], "formation": "surround"},
-        ],
-        "spawn_interval": 0.5,
-        "has_boss": False,
-    },
-    8: {  # 最终关前哨
-        "waves": [
-            {"units": [("normal", 6), ("fast", 4), ("tracking", 2)], "formation": "vshape"},
-            {"units": [("normal", 5), ("fast", 4), ("elite", 3)], "formation": "cross"},
-            {"units": [("normal", 6), ("fast", 5), ("tracking", 3)], "formation": "triangle"},
-            {"units": [("normal", 8), ("fast", 4), ("elite", 3), ("tracking", 2)], "formation": "arc"},
-            {"units": [("normal", 10), ("fast", 5), ("elite", 3), ("tracking", 2)], "formation": "surround"},
-        ],
-        "spawn_interval": 0.45,
-        "has_boss": False,
-    },
-    9: {  # ⭐ 最终 Boss 战
-        "waves": [
-            {"units": [("normal", 8), ("fast", 5), ("tracking", 2)], "formation": "vshape"},
-            {"units": [("normal", 6), ("fast", 5), ("elite", 3), ("tracking", 2)], "formation": "cross"},
-            {"units": [("normal", 10), ("fast", 4), ("elite", 3)], "formation": "triangle"},
-            {"units": [("normal", 8), ("fast", 5), ("tracking", 3), ("elite", 2)], "formation": "arc"},
-            {"units": [("normal", 10), ("fast", 6), ("elite", 4), ("tracking", 3)], "formation": "surround"},
-            {"units": [("normal", 8), ("fast", 6), ("elite", 4), ("tracking", 3)], "formation": "cross"},
-        ],
-        "spawn_interval": 0.4,
-        "has_boss": True,
-        "final": True,  # 击败最终 Boss 通关
-    },
-}
-
-# 波次间休息时间（秒）
-WAVE_REST_DURATION: float = 1.2  # 原2.0 → 节奏更快
-# 波次推进提示显示时间
-WAVE_ANNOUNCE_DURATION: float = 1.0
-# ⭐ 阵型波次敌机生成间隔（秒）— 快速序列，让编队可见
-FORMATION_SPAWN_INTERVAL: float = 0.12
+# ---------------------- 关卡波次系统（⭐ levels/ 包） ---------------------- #
+# 以下常量已迁移到 levels/ 目录：
+#   levels/waves.py       — LEVEL_WAVES, EnemyWaveType, WAVE_* 常量
+#   levels/formations.py  — FormationType, FORMATION_DEFAULTS, FORMATION_SPAWN_INTERVAL
+# 此处保留重新导出，保持向后兼容
+from levels import (
+    LEVEL_WAVES, WAVE_REST_DURATION, WAVE_ANNOUNCE_DURATION,
+    EnemyWaveType,
+    FormationType, FORMATION_DEFAULTS, FORMATION_SPAWN_INTERVAL,
+    FINAL_BOSS_LEVEL,
+)
 # 飘字得分：上浮速度（像素/秒）
 FLOATING_TEXT_SPEED: float = 80.0
 # 飘字得分：存在时间（秒）

@@ -10,7 +10,7 @@ import math
 import pygame
 from settings import (
     SCREEN_WIDTH, SCREEN_HEIGHT,
-    BACKGROUND_BASE_SPEED, BACKGROUND_LAYERS,
+    BACKGROUND_BASE_SPEED,
     BLACK, WHITE,
 )
 
@@ -363,72 +363,14 @@ class CelestialBody:
 
 
 # ═══════════════════════════════════════════════════════════════════
-# 主题定义
+# 主题定义 → levels/themes.py
 # ═══════════════════════════════════════════════════════════════════
 
-class BackgroundTheme:
-    def __init__(self, name, layer_configs, overlay_color=(0, 0, 0),
-                 overlay_alpha=0, accent_color=(255, 255, 255),
-                 nebula_count=2, celestial_chance=0.5):
-        self.name = name
-        self.layer_configs = layer_configs
-        self.overlay_color = overlay_color
-        self.overlay_alpha = overlay_alpha
-        self.accent_color = accent_color
-        self.nebula_count = nebula_count
-        self.celestial_chance = celestial_chance
-
-
-THEME_STARFIELD = BackgroundTheme(
-    name="星空",
-    layer_configs=[
-        (60, 1, 2, 0.3, 60, 120, (180, 200, 255)),   # 原40→60
-        (35, 2, 4, 0.6, 100, 170, (200, 220, 255)),   # 原25→35
-        (20, 3, 6, 1.0, 150, 255, (255, 255, 255)),   # 原15→20
-    ],
-    overlay_color=(0, 0, 20), overlay_alpha=12,
-    accent_color=(100, 180, 255),
-    nebula_count=3, celestial_chance=0.5,  # 原2→3
+from levels.themes import (
+    BackgroundTheme,
+    THEME_STARFIELD, THEME_NEBULA, THEME_RED_ALERT,
+    LEVEL_THEMES, get_theme_for_level,
 )
-
-THEME_NEBULA = BackgroundTheme(
-    name="星云",
-    layer_configs=[
-        (70, 1, 3, 0.3, 40, 100, (200, 150, 255)),   # 原50→70
-        (40, 2, 5, 0.6, 60, 140, (255, 200, 150)),   # 原30→40
-        (25, 3, 7, 1.0, 100, 200, (255, 180, 100)),  # 原20→25
-    ],
-    overlay_color=(30, 10, 40), overlay_alpha=20,
-    accent_color=(200, 150, 255),
-    nebula_count=5, celestial_chance=0.8,  # 原4→5
-)
-
-THEME_RED_ALERT = BackgroundTheme(
-    name="警戒",
-    layer_configs=[
-        (50, 1, 2, 0.3, 40, 80, (180, 60, 60)),     # 原30→50
-        (30, 2, 4, 0.6, 60, 120, (220, 80, 80)),    # 原20→30
-        (15, 3, 6, 1.0, 80, 180, (255, 100, 50)),   # 原10→15
-    ],
-    overlay_color=(40, 0, 0), overlay_alpha=25,
-    accent_color=(255, 80, 80),
-    nebula_count=6, celestial_chance=0.3,  # 原5→6
-)
-
-LEVEL_THEMES = [
-    (1, THEME_STARFIELD),
-    (4, THEME_NEBULA),
-    (7, THEME_RED_ALERT),
-]
-
-
-def get_theme_for_level(level):
-    theme = THEME_STARFIELD
-    for threshold, t in LEVEL_THEMES:
-        if level >= threshold:
-            theme = t
-    return theme
-
 
 # ═══════════════════════════════════════════════════════════════════
 # 主背景类

@@ -91,9 +91,16 @@ class Spawner:
         self.type_counts: dict[str, int] = {
             "normal": 0, "fast": 0, "elite": 0, "tracking": 0,
         }
+        # ⭐ 无尽模式难度倍率（默认1.0）
+        self._endless_mult: float = 1.0
         # 本关已消灭敌机数（用于波次清空检测）
         self.kills_this_level: int = 0
         self._alive_count: int = 0  # 当前在场敌机数
+        # ⭐ 波次击杀追踪（需全部击杀才推进）
+        self._wave_spawned: int = 0      # 本波已生成敌机数
+        self._wave_killed: int = 0       # 本波已消灭敌机数
+        self._wave_last_spawn: float = 0.0  # 本波最后一只生成时间
+        self._wave_timeout: float = 12.0      # 安全超时（秒）
 
         # 预加载关卡1配置
         self.set_level(1)
@@ -126,6 +133,7 @@ class Spawner:
     def on_enemy_killed(self) -> None:
         """由 Game 碰撞系统调用，记录本关击杀。"""
         self.kills_this_level += 1
+        self._wave_killed += 1  # ⭐ 本波击杀
 
     def on_boss_defeated(self) -> None:
         """Boss 被击毁后调用。"""
@@ -148,6 +156,7 @@ class Spawner:
         self._alive_count = 0
         self.type_counts = {k: 0 for k in self.type_counts}
         self._wave_announce_timer = 0.0
+        self._endless_mult = 1.0
         self.set_level(1)
 
     # ================================================================
@@ -168,7 +177,7 @@ class Spawner:
 
     @property
     def wave_cleared(self) -> bool:
-        """当前波次是否已清空（生成队列为空且所有敌机已消灭或出屏）。"""
+        """当前波次是否已清空 — 需生成队列为空且场上无敌机存活。"""
         return len(self._spawn_queue) == 0
 
     @property
@@ -237,8 +246,17 @@ class Spawner:
         if self._wave_announce_timer > 0:
             self._wave_announce_timer -= dt
 
-        # ---- 检查波次是否清空（生成队列空 + 场上无敌机） ----
+        # ---- 检查波次是否已全部消灭（⭐ 击杀制） ----
         if self.wave_cleared:
+            # ⭐ 击杀制: 队列空只是前提，还需所有敌机被杀或超时
+            all_killed = self._wave_killed >= self._wave_spawned
+            no_enemies_alive = len(enemy_group) == 0
+            now_ticks = pygame.time.get_ticks() / 1000.0
+            timed_out = self._wave_spawned > 0 and (now_ticks - self._wave_last_spawn) > self._wave_timeout
+            
+            if not all_killed and not no_enemies_alive and not timed_out:
+                return new_boss  # 还有敌人活着，继续等待
+            
             # ⭐ 如果 Boss 已生成，不再重复触发
             if self._boss_spawned:
                 return new_boss
@@ -273,6 +291,9 @@ class Spawner:
                 all_sprites.add(enemy)
                 self.total_spawned += 1
                 self.type_counts[etype] = self.type_counts.get(etype, 0) + 1
+                # ⭐ 追踪本波生成
+                self._wave_spawned += 1
+                self._wave_last_spawn = pygame.time.get_ticks() / 1000.0
 
         return new_boss
 
@@ -320,6 +341,10 @@ class Spawner:
             self._is_formation_wave = True
 
         self._spawn_timer = 0.0
+        # ⭐ 重置本波击杀追踪
+        self._wave_spawned = 0
+        self._wave_killed = 0
+        self._wave_last_spawn = 0.0
 
     # ================================================================
     # ⭐ 阵型位置计算
@@ -451,9 +476,12 @@ class Spawner:
             else:
                 return None
 
-            e.speed *= speed_scale
-            e.hp = max(1, int(e.hp * hp_scale))
+            e.speed *= speed_scale * self._endless_mult
+            e.hp = max(1, int(e.hp * hp_scale * self._endless_mult))
             e.max_hp = e.hp
+            # ⭐ 无尽模式：敌机更快更硬
+            if self._endless_mult > 1.0:
+                e._fire_interval = max(0.3, e._fire_interval / self._endless_mult)
             return e
         except Exception as ex:
             print(f"[Spawner] 生成 {etype} 失败: {ex}")

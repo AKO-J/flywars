@@ -218,6 +218,10 @@ class Game:
         self._boss_dying_timer: float = 0.0
         self._boss_dying_positions: list[tuple[int, int]] = []
         self._boss_dying_level: int = 0
+        # ⭐ 无尽模式
+        self._endless_active: bool = False
+        self._endless_round: int = 0
+        self._endless_mult: float = 1.0
 
         # ---- 排行榜 ----
         self.leaderboard: Leaderboard = Leaderboard()
@@ -606,10 +610,24 @@ class Game:
                     self._entering_name = True
                     self._name_buffer = ""
                 else:
-                    self._go_to_upgrade()  # ⭐ 先去升级界面
+                    self._go_to_upgrade()
+                return
+            if key in (pygame.K_SPACE, pygame.K_RETURN):
+                # ⭐ 进入无尽模式
+                self._endless_active = True
+                self._endless_round = 1
+                self._endless_mult = 1.15
+                self.state = GameState.PLAYING
+                self.spawner.set_level(9)
+                self.collision.current_level = 9
+                self._level_transition_text = "—— 无尽模式 ——"
+                self._level_transition_alpha = 200
+                self._level_transition_timer = 2.5
+                self._level_transition_scale = 0.0
+                self.audio.start_bgm()
                 return
             if key in (pygame.K_ESCAPE, pygame.K_q):
-                self._go_to_upgrade()  # ⭐ 先去升级界面
+                self._go_to_upgrade()
                 return
 
         # ═══════════════════════════════════════════════════
@@ -980,13 +998,36 @@ class Game:
         if self.spawner.level_complete:
             new_level = self.spawner.level + 1
             if new_level > FINAL_BOSS_LEVEL:
-                # 通关第9关 → 胜利
-                self.state = GameState.VICTORY
-                self._event_bus.publish(Event(GameEvent.GAME_OVER, {
-                    "victory": True, "score": self.collision.score,
-                }))
-                self.audio.stop_bgm()
+                # ⭐ 最终Boss被击败 → 通关 → 进入无尽模式
+                if not getattr(self, '_endless_active', False):
+                    # 第一次通关：显示胜利画面
+                    self.state = GameState.VICTORY
+                    self._event_bus.publish(Event(GameEvent.GAME_OVER, {
+                        "victory": True, "score": self.collision.score,
+                    }))
+                    self.audio.stop_bgm()
+                    self._endless_round = 1
+                else:
+                    # ⭐ 无尽模式：循环第9关波次，难度持续增长
+                    self._endless_round += 1
+                    for e in list(self.enemies): e.kill()
+                    for b in list(self.bullets): b.kill()
+                    self.spawner.set_level(9)
+                    self.collision.current_level = 9
+                    self._level_transition_text = f"—— 无尽 第{self._endless_round}轮 ——"
+                    self._level_transition_alpha = 200
+                    self._level_transition_timer = 2.5
+                    self._level_transition_scale = 0.0
+                    self._screen_shake = max(self._screen_shake, 4.0)
+                    # 通知 spawner 无尽轮次（用于难度缩放）
+                    self._endless_mult = 1.0 + self._endless_round * 0.15
+                    self.spawner._endless_mult = self._endless_mult
             else:
+                # ⭐ 清除上一关残留的敌机和子弹
+                for e in list(self.enemies):
+                    e.kill()
+                for b in list(self.bullets):
+                    b.kill()
                 self.spawner.set_level(new_level)
                 self.collision.current_level = new_level  # ⭐ 同步关卡到碰撞系统
                 self._event_bus.publish(Event(GameEvent.LEVEL_UP, {
@@ -1395,6 +1436,10 @@ class Game:
             len(self.enemies), self.spawner.type_counts,
             network_status=self.network.status_text() if self.network.running else "",
             network_color=self.network.status_color() if self.network.running else RED,
+            spawner_level=self.spawner.level,
+            current_wave=self.spawner.current_wave,
+            total_waves=self.spawner.total_waves,
+            has_boss=self.spawner.boss_active or self.spawner._has_boss,
         )
 
         # ── 团队积分 / 计时器 ──
@@ -1532,6 +1577,10 @@ class Game:
             combo_text=self.collision.combo_display_text,
             combo_count=self.collision.combo_count,
             combo_multiplier=self.collision.combo_multiplier,
+            spawner_level=self.spawner.level,
+            current_wave=self.spawner.current_wave,
+            total_waves=self.spawner.total_waves,
+            has_boss=self.spawner.boss_active or self.spawner._has_boss,
         )
 
         # ── 团队积分 / 计时器 ──
@@ -2542,6 +2591,10 @@ class Game:
         self._boss = None
         self._boss_dying = False
         self._boss_dying_positions.clear()
+        self._boss_dying_level = 0
+        self._endless_active = False
+        self._endless_round = 0
+        self._endless_mult = 1.0
         self._entering_name = False
         self._name_buffer = ""
         self._screen_shake = 0.0

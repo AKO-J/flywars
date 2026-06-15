@@ -117,13 +117,7 @@ class UISystem:
             ft for ft in self.floating_texts if ft.update(dt)
         ]
 
-        # 关卡检测
-        new_level: int = score // LEVEL_SCORE_BASE + 1
-        if new_level > self._current_level:
-            self._current_level = new_level
-            self._level_up_timer = LEVEL_UP_DISPLAY_TIME
-
-        # 关卡提示计时器
+        # 关卡提示计时器（关卡提升在 render() 中由 spawner_level 触发）
         if self._level_up_timer > 0:
             self._level_up_timer -= dt
             if self._level_up_timer < 0:
@@ -159,9 +153,19 @@ class UISystem:
         combo_text: str = "",           # ⭐ 连击文字
         combo_count: int = 0,           # ⭐ 连击数
         combo_multiplier: int = 1,      # ⭐ 连击倍率
+        # ⭐ 关卡/波次信息
+        spawner_level: int = 1,
+        current_wave: int = 0,
+        total_waves: int = 0,
+        has_boss: bool = False,
     ) -> None:
-        """绘制全部 UI 层（HUD → 道具指示器 → ⭐ 连击 → 飘字 → 关卡提示 → 炸弹闪屏 → 网络状态）。"""
-        self._draw_hud(screen, player, score, enemy_count, spawner_counts)
+        """绘制全部 UI 层。"""
+        # ⭐ 用 spawner 的真实关卡更新显示
+        if spawner_level > self._current_level:
+            self._current_level = spawner_level
+            self._level_up_timer = LEVEL_UP_DISPLAY_TIME
+        self._draw_hud(screen, player, score, enemy_count, spawner_counts,
+                       spawner_level, current_wave, total_waves, has_boss)
         self._draw_powerup_indicator(screen, player)
         # ⭐ 连击显示
         self._draw_combo(screen, combo_text, combo_count, combo_multiplier)
@@ -302,13 +306,17 @@ class UISystem:
         score: int,
         enemy_count: int,
         tc: dict[str, int],
+        spawner_level: int = 1,
+        current_wave: int = 0,
+        total_waves: int = 0,
+        has_boss: bool = False,
     ) -> None:
-        """左上角 HUD：带半透明面板背景 — HP条 → 蓄力 → 分数 → 关卡 → 敌机统计"""
+        """左上角 HUD：HP条 → 蓄力 → 分数 → 关卡/波次 → 敌机统计"""
         x0, y = 8, 8
-        pad = 6  # 面板内边距
+        pad = 6
 
-        # ── 半透明面板背景 ──
-        panel_w, panel_h = 210, 140
+        # ── 半透明面板背景（加高以容纳波次信息）──
+        panel_w, panel_h = 220, 170
         draw_panel(screen, (x0 - pad, y - pad, panel_w, panel_h), alpha=200)
 
         # ── 第1行：HP 条（分段式）──
@@ -381,13 +389,27 @@ class UISystem:
         screen.blit(score_surf, (x0, y))
         y += 26
 
-        # ── 第4行：关卡 ──
+        # ── 第4行：关卡（真实波次）──
         level_color = ACCENT_CYAN if self._level_up_timer > 0 else TEXT_NORMAL
-        level_surf = self._font_normal.render(
-            f"关卡  {self._current_level}", True, level_color
-        )
+        if has_boss and current_wave >= total_waves - 1:
+            # Boss 逼近
+            level_text = f"⚠ 第{spawner_level}关 BOSS逼近!"
+            level_color = (255, 100, 50)
+        elif current_wave < total_waves:
+            level_text = f"第{spawner_level}关 · 波{current_wave+1}/{total_waves}"
+        else:
+            level_text = f"第{spawner_level}关  BOSS战中!"
+            level_color = (255, 50, 50)
+        level_surf = self._font_normal.render(level_text, True, level_color)
         screen.blit(level_surf, (x0, y))
         y += 22
+
+        # ── 第5行：Boss提示条（Boss关最后一波闪烁提示）──
+        if has_boss and current_wave == total_waves - 1 and self._level_up_timer <= 0:
+            if int(pygame.time.get_ticks() / 400) % 2 == 0:
+                boss_warn = self._font_small.render("🐉 Boss 即将出现!", True, (255, 80, 80))
+                screen.blit(boss_warn, (x0, y))
+                y += 18
 
         # ── 第5行：敌机统计（分色显示）──
         draw_text_left(screen, f"敌机:{enemy_count}", (x0, y), self._font_small, TEXT_DIM)
