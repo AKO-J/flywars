@@ -1440,6 +1440,8 @@ class Game:
             current_wave=self.spawner.current_wave,
             total_waves=self.spawner.total_waves,
             has_boss=self.spawner.boss_active or self.spawner._has_boss,
+            xp_current=self.upgrade_data.current_xp,
+            xp_next=self.upgrade_data.next_xp,
         )
 
         # ── 团队积分 / 计时器 ──
@@ -1581,6 +1583,8 @@ class Game:
             current_wave=self.spawner.current_wave,
             total_waves=self.spawner.total_waves,
             has_boss=self.spawner.boss_active or self.spawner._has_boss,
+            xp_current=self.upgrade_data.current_xp,
+            xp_next=self.upgrade_data.next_xp,
         )
 
         # ── 团队积分 / 计时器 ──
@@ -1641,9 +1645,13 @@ class Game:
         wave_text = font.render(wave_str, True, wave_color)
         wr = wave_text.get_rect(topright=(SCREEN_WIDTH - 12, 30))
         self.screen.blit(wave_text, wr)
-        remaining = len(self.enemies) + (len(s._spawn_queue) if hasattr(s, '_spawn_queue') else 0)
-        if remaining > 0 and not s.all_waves_done:
-            rem_text = font.render(f"残敌 {remaining}", True, (180, 180, 200))
+        # ⭐ 击杀进度：只有击杀所有敌机才能推进
+        if len(s._spawn_queue) == 0 and s._wave_spawned > 0:
+            remaining = s._wave_spawned - s._wave_killed
+            if remaining > 0:
+                rem_text = font.render(f"⚔ 击毁剩余 {remaining} 敌机!", True, (255, 200, 60))
+            else:
+                rem_text = font.render("✓ 波次清空!", True, (100, 255, 100))
             rr = rem_text.get_rect(topright=(SCREEN_WIDTH - 12, 50))
             self.screen.blit(rem_text, rr)
 

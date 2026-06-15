@@ -248,14 +248,15 @@ class Spawner:
 
         # ---- 检查波次是否已全部消灭（⭐ 击杀制） ----
         if self.wave_cleared:
-            # ⭐ 击杀制: 队列空只是前提，还需所有敌机被杀或超时
+            # ⭐ 必须击杀所有敌机（或超时兜底）
             all_killed = self._wave_killed >= self._wave_spawned
-            no_enemies_alive = len(enemy_group) == 0
             now_ticks = pygame.time.get_ticks() / 1000.0
             timed_out = self._wave_spawned > 0 and (now_ticks - self._wave_last_spawn) > self._wave_timeout
             
-            if not all_killed and not no_enemies_alive and not timed_out:
-                return new_boss  # 还有敌人活着，继续等待
+            if not all_killed and not timed_out:
+                return new_boss  # 还在等击杀，不放行
+            if not all_killed and timed_out:
+                print(f"[Spawner] ⚠ 超时 {self._wave_timeout}s 强制推进 (已杀 {self._wave_killed}/{self._wave_spawned})")
             
             # ⭐ 如果 Boss 已生成，不再重复触发
             if self._boss_spawned:

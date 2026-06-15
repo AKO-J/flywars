@@ -566,7 +566,8 @@ class BossEnemy(Enemy):
     MODE_CIRCLE: str = "circle"  # 圆形弹幕
     MODE_AIMED: str = "aimed"    # 瞄准弹幕
     MODE_SPIRAL: str = "spiral"  # 螺旋弹幕
-    MODE_CROSS: str = "cross"    # ⭐ 交叉弹幕（Phase 2+）
+    MODE_CROSS: str = "cross"    # 交叉弹幕
+    MODE_WALL: str = "wall"      # ⭐ 弹幕墙
 
     # ⭐ 战斗阶段
     PHASE_1: str = "phase1"  # HP > 70%
@@ -731,262 +732,239 @@ class BossEnemy(Enemy):
             self._patrol_dir = -1.0
 
     # ================================================================
-    # 弹幕系统
+    # ⭐ 弹幕系统（全面强化版）
     # ================================================================
 
     def fire(self, dt: float) -> list[Bullet]:
-        """
-        每帧调用，返回本帧需要发射的子弹列表。
-        ————————————————————————————————
-        主游戏循环将返回的子弹加入 bullets 组。
-        弹幕计时受战斗阶段射速倍率影响。
-        """
+        try:
+            return self._fire_impl(dt)
+        except Exception as e:
+            import traceback
+            print(f"[BOSS CRASH] fire() error: {e}")
+            traceback.print_exc()
+            return []
+
+    def _fire_impl(self, dt: float) -> list[Bullet]:
         if self._phase != "patrol":
-            return []  # 进入阶段不攻击
-
-        # ⭐ 检测战斗阶段切换
+            return []
         self._update_combat_phase()
-
-        # 阶段过渡动画
         if self._phase_transitioning:
             self._phase_transition_timer += dt
             self._phase_flash_alpha = max(0, self._phase_flash_alpha - dt * 300)
             if self._phase_transition_timer > 0.8:
                 self._phase_transitioning = False
 
-        # 射速倍率
         rate_mult = self._get_phase_fire_rate_mult()
-
         self._fire_timer += dt
         bullets: list[Bullet] = []
 
-        # ⭐ 加权随机弹幕选择（替代固定轮换）
         interval = self._choose_bullet_interval()
         if self._fire_timer >= interval:
             self._fire_timer = 0.0
             bullets = self._fire_selected_mode()
-            # 螺旋弹幕需要持续累积角度
             if self._fire_mode == self.MODE_SPIRAL:
-                self._spiral_angle += 0.35 * self._get_phase_speed_mult()
-                spiral_max = 6.0 * math.pi if self._combat_phase == self.PHASE_3 else 4.0 * math.pi
+                self._spiral_angle += 0.5 * self._get_phase_speed_mult()
+                spiral_max = 8.0 * math.pi if self._combat_phase == self.PHASE_3 else 6.0 * math.pi
                 if self._spiral_angle > spiral_max:
                     self._spiral_angle = 0.0
-            # 选择下一发弹幕
-            self._fire_mode = self._choose_next_mode()
-
+                    self._fire_mode = self._choose_next_mode()
+            else:
+                self._fire_mode = self._choose_next_mode()
         return bullets
 
     def _choose_next_mode(self) -> str:
-        """基于玩家位置和战斗阶段加权随机选择下一发弹幕。"""
-        weights: dict[str, int] = {
-            self.MODE_FAN: 25,
-            self.MODE_CIRCLE: 25,
-            self.MODE_AIMED: 25,
-            self.MODE_SPIRAL: 10,
+        weights = {
+            self.MODE_FAN: 20, self.MODE_CIRCLE: 20,
+            self.MODE_AIMED: 20, self.MODE_SPIRAL: 10,
+            self.MODE_WALL: 10,
         }
         if self._combat_phase in (self.PHASE_2, self.PHASE_3):
             weights[self.MODE_CROSS] = 20
-            weights[self.MODE_SPIRAL] = 20
+            weights[self.MODE_SPIRAL] = 15
+            weights[self.MODE_WALL] = 15
         if self._combat_phase == self.PHASE_3:
-            weights[self.MODE_SPIRAL] = 30
-            weights[self.MODE_CROSS] = 25
-            weights[self.MODE_FAN] = 15
-        # 根据玩家位置调整权重
+            weights[self.MODE_SPIRAL] = 25
+            weights[self.MODE_CROSS] = 20
+            weights[self.MODE_WALL] = 20
+            weights[self.MODE_FAN] = 12
         if self._player is not None:
             dx = abs(self._player.rect.centerx - self.rect.centerx)
-            dy = self._player.rect.centery - self.rect.centery
-            if dx < 60:  # 玩家在正下方 → 高概率瞄准+螺旋
-                weights[self.MODE_AIMED] += 20
+            if dx < 60:
+                weights[self.MODE_AIMED] += 15
                 weights[self.MODE_SPIRAL] += 10
-            if dy < 150:  # 玩家靠近Boss顶部 → 扇形封锁
-                weights[self.MODE_FAN] += 15
-                weights[self.MODE_CIRCLE] += 15
         return random.choices(list(weights.keys()), weights=list(weights.values()))[0]
 
     def _choose_bullet_interval(self) -> float:
-        """返回当前弹幕模式的发射间隔。"""
         rate_mult = self._get_phase_fire_rate_mult()
         intervals = {
             self.MODE_FAN: BOSS_FAN_INTERVAL * rate_mult,
             self.MODE_CIRCLE: BOSS_FIRE_INTERVAL_CIRCLE * rate_mult,
             self.MODE_AIMED: BOSS_FIRE_INTERVAL_AIMED * rate_mult,
-            self.MODE_CROSS: BOSS_FIRE_INTERVAL_AIMED * rate_mult * 0.8,
+            self.MODE_CROSS: BOSS_FIRE_INTERVAL_AIMED * rate_mult * 0.7,
             self.MODE_SPIRAL: BOSS_FIRE_INTERVAL_SPIRAL * rate_mult,
+            self.MODE_WALL: BOSS_FAN_INTERVAL * rate_mult * 1.2,
         }
         return intervals.get(self._fire_mode, 0.5)
 
     def _fire_selected_mode(self) -> list[Bullet]:
-        """执行当前弹幕模式的发射逻辑。"""
-        if self._fire_mode == self.MODE_FAN:
-            return self._fire_fan()
-        elif self._fire_mode == self.MODE_CIRCLE:
-            return self._fire_circle()
-        elif self._fire_mode == self.MODE_AIMED:
-            return self._fire_aimed()
-        elif self._fire_mode == self.MODE_CROSS:
-            return self._fire_cross()
-        elif self._fire_mode == self.MODE_SPIRAL:
-            return self._fire_spiral()
-        return []
+        fn = {
+            self.MODE_FAN: self._fire_fan,
+            self.MODE_CIRCLE: self._fire_circle,
+            self.MODE_AIMED: self._fire_aimed,
+            self.MODE_CROSS: self._fire_cross,
+            self.MODE_SPIRAL: self._fire_spiral,
+            self.MODE_WALL: self._fire_wall,
+        }
+        return fn.get(self._fire_mode, lambda: [])()
 
-    # ================================================================
-    # 扇形弹幕（题19：向玩家方向扇形散射）
-    # ================================================================
+    # ════════════════════════════════════════════════════════════════
+    # 扇形弹幕 — 24发密集扇面
+    # ════════════════════════════════════════════════════════════════
 
     def _fire_fan(self) -> list[Bullet]:
-        """扇形弹幕：向玩家方向发射扇形散射弹。"""
-        if self._fire_timer < BOSS_FAN_INTERVAL:
-            return []
-        self._fire_timer = 0.0
-        self._fire_mode = self.MODE_AIMED  # 下一轮切换为瞄准弹幕
-
-        bullets: list[Bullet] = []
-        cx = self.rect.centerx
-        cy = self.rect.bottom
-
-        # 计算朝向玩家的基准角度
+        bullets = []
+        cx, cy = self.rect.centerx, self.rect.bottom
         if self._player is not None:
             dx = float(self._player.rect.centerx) - cx
             dy = float(self._player.rect.centery) - cy
             base_angle = math.atan2(dy, dx) if dy > 0 else math.pi / 2
         else:
-            base_angle = math.pi / 2  # 默认正下方
-
-        # 扇形范围
+            base_angle = math.pi / 2
         half_fan = math.radians(BOSS_FAN_ANGLE / 2.0)
-        start_angle = base_angle - half_fan
         n = BOSS_FAN_COUNT
-        angle_step = (2.0 * half_fan) / (n - 1) if n > 1 else 0.0
-
+        step = (2.0 * half_fan) / max(n - 1, 1)
         for i in range(n):
-            angle = start_angle + angle_step * i
-            # 确保子弹有向下的分量
-            vy = max(math.sin(angle), 0.15)
+            angle = base_angle - half_fan + step * i
+            vy = max(math.sin(angle), 0.2)
             vx = math.cos(angle)
-            speed = BOSS_BULLET_SPEED * (0.55 + 0.15 * (i % 3))
+            spd = BOSS_BULLET_SPEED * random.uniform(0.6, 0.9)
             b = Bullet(cx, cy, BulletSource.ENEMY, direction=1,
-                       speed=speed, damage=BOSS_BULLET_DAMAGE, style="normal")
-            b._vx = vx * speed
-            b._vy = vy * speed
+                       speed=spd, damage=BOSS_BULLET_DAMAGE, style="elite")
+            b._vx, b._vy = vx * spd, vy * spd
             b._custom_velocity = True
             bullets.append(b)
         return bullets
-
-    def _fire_circle(self) -> list[Bullet]:
-        """圆形弹幕：12方向散弹。"""
-        if self._fire_timer < BOSS_FIRE_INTERVAL_CIRCLE:
-            return []
-        self._fire_timer = 0.0
-        self._fire_mode = self.MODE_FAN  # 下一轮切回扇形弹幕
-
-        bullets: list[Bullet] = []
-        cx = self.rect.centerx
-        cy = self.rect.bottom
-        n = 12
-        for i in range(n):
-            angle = 2.0 * math.pi * i / n
-            vx = math.cos(angle) * BOSS_BULLET_SPEED * 0.6
-            vy = math.sin(angle) * BOSS_BULLET_SPEED * 0.6
-            # 排除正上方（i≈9），避免背向玩家
-            b = Bullet(cx, cy, BulletSource.ENEMY, direction=1,
-                       speed=BOSS_BULLET_SPEED * 0.7, damage=BOSS_BULLET_DAMAGE,
-                       style="elite")
-            b._vx = vx
-            b._vy = vy
-            b._custom_velocity = True
-            bullets.append(b)
-        return bullets
-
-    def _fire_aimed(self) -> list[Bullet]:
-        """瞄准弹幕：向玩家位置发射 3 发。"""
-        if self._fire_timer < BOSS_FIRE_INTERVAL_AIMED:
-            return []
-        self._fire_timer = 0.0
-        self._fire_mode = self.MODE_SPIRAL
-
-        bullets: list[Bullet] = []
-        if self._player is None:
-            return bullets
-
-        cx = self.rect.centerx
-        cy = self.rect.bottom
-        tx = float(self._player.rect.centerx)
-        ty = float(self._player.rect.centery)
-
-        base_dx = tx - cx
-        base_dy = ty - cy
-        base_dist = math.sqrt(base_dx * base_dx + base_dy * base_dy)
-        if base_dist < 1.0:
-            base_dx, base_dy = 0.0, 1.0
-            base_dist = 1.0
-        base_dx /= base_dist
-        base_dy /= base_dist
-
-        for angle_offset in (-0.15, 0.0, 0.15):
-            cos_a = math.cos(angle_offset)
-            sin_a = math.sin(angle_offset)
-            dx = base_dx * cos_a - base_dy * sin_a
-            dy = base_dx * sin_a + base_dy * cos_a
-            b = Bullet(cx, cy, BulletSource.ENEMY, direction=1,
-                       speed=BOSS_BULLET_SPEED * 0.8, damage=BOSS_BULLET_DAMAGE,
-                       style="tracking")
-            b._vx = dx * BOSS_BULLET_SPEED * 0.8
-            b._vy = dy * BOSS_BULLET_SPEED * 0.8
-            b._custom_velocity = True
-            bullets.append(b)
-        return bullets
-
-    def _fire_spiral(self) -> list[Bullet]:
-        """螺旋弹幕：连续发射，角度持续旋转。"""
-        if self._fire_timer < BOSS_FIRE_INTERVAL_SPIRAL:
-            return []
-        self._fire_timer = 0.0
-
-        # 螺旋持续一段时间后切回圆形弹幕
-        self._spiral_angle += 0.3
-        if self._spiral_angle > 4.0 * math.pi:
-            self._spiral_angle = 0.0
-            self._fire_mode = self.MODE_CIRCLE
-
-        cx = self.rect.centerx
-        cy = self.rect.bottom
-        b = Bullet(cx, cy, BulletSource.ENEMY, direction=1,
-                   speed=BOSS_BULLET_SPEED * 0.5, damage=BOSS_BULLET_DAMAGE,
-                   style="fast")
-        b._vx = math.cos(self._spiral_angle) * BOSS_BULLET_SPEED * 0.6
-        b._vy = abs(math.sin(self._spiral_angle)) * BOSS_BULLET_SPEED * 0.6 + BOSS_BULLET_SPEED * 0.2
-        b._custom_velocity = True
-        return [b]
 
     # ════════════════════════════════════════════════════════════════
-    # ⭐ 交叉弹幕（Phase 2+ 新增）
+    # 圆形弹幕 — 20方向，下半圈更密
+    # ════════════════════════════════════════════════════════════════
+
+    def _fire_circle(self) -> list[Bullet]:
+        bullets = []
+        cx, cy = self.rect.centerx, self.rect.bottom
+        n_lower, n_upper = 16, 4
+        for i in range(n_lower):
+            angle = math.pi * 0.1 + math.pi * 0.8 * i / max(n_lower - 1, 1)
+            spd = BOSS_BULLET_SPEED * random.uniform(0.55, 0.75)
+            b = Bullet(cx, cy, BulletSource.ENEMY, direction=1,
+                       speed=spd, damage=BOSS_BULLET_DAMAGE, style="elite")
+            b._vx, b._vy = math.cos(angle) * spd, abs(math.sin(angle)) * spd
+            b._custom_velocity = True
+            bullets.append(b)
+        for i in range(n_upper):
+            angle = math.pi * 1.1 + math.pi * 0.8 * i / max(n_upper - 1, 1)
+            spd = BOSS_BULLET_SPEED * 0.5
+            b = Bullet(cx, cy, BulletSource.ENEMY, direction=1,
+                       speed=spd, damage=BOSS_BULLET_DAMAGE, style="fast")
+            b._vx, b._vy = math.cos(angle) * spd, -abs(math.sin(angle)) * spd
+            b._custom_velocity = True
+            bullets.append(b)
+        return bullets
+
+    # ════════════════════════════════════════════════════════════════
+    # 瞄准弹幕 — 6发覆盖射击
+    # ════════════════════════════════════════════════════════════════
+
+    def _fire_aimed(self) -> list[Bullet]:
+        bullets = []
+        if self._player is None:
+            return bullets
+        cx, cy = self.rect.centerx, self.rect.bottom
+        tx, ty = float(self._player.rect.centerx), float(self._player.rect.centery)
+        bdx, bdy = tx - cx, ty - cy
+        dist = max(math.sqrt(bdx * bdx + bdy * bdy), 1)
+        bdx /= dist
+        bdy /= dist
+        offsets = (-0.25, -0.12, -0.04, 0.04, 0.12, 0.25)
+        for off in offsets:
+            spd = BOSS_BULLET_SPEED * random.uniform(0.7, 0.9)
+            ca, sa = math.cos(off), math.sin(off)
+            dx, dy = bdx * ca - bdy * sa, bdx * sa + bdy * ca
+            b = Bullet(cx, cy, BulletSource.ENEMY, direction=1,
+                       speed=spd, damage=BOSS_BULLET_DAMAGE, style="tracking")
+            b._vx, b._vy = dx * spd, dy * spd
+            b._custom_velocity = True
+            bullets.append(b)
+        return bullets
+
+    # ════════════════════════════════════════════════════════════════
+    # 螺旋弹幕 — 每次2发双螺旋
+    # ════════════════════════════════════════════════════════════════
+
+    def _fire_spiral(self) -> list[Bullet]:
+        bullets = []
+        cx, cy = self.rect.centerx, self.rect.bottom
+        self._spiral_angle += 0.5 * self._get_phase_speed_mult()
+        for offset in (0, math.pi):
+            a = self._spiral_angle + offset
+            spd = BOSS_BULLET_SPEED * random.uniform(0.5, 0.7)
+            b = Bullet(cx, cy, BulletSource.ENEMY, direction=1,
+                       speed=spd, damage=BOSS_BULLET_DAMAGE, style="fast")
+            b._vx = math.cos(a) * spd * 0.7
+            b._vy = abs(math.sin(a)) * spd * 0.7 + spd * 0.2
+            b._custom_velocity = True
+            bullets.append(b)
+        return bullets
+
+    # ════════════════════════════════════════════════════════════════
+    # 交叉弹幕 — 每线10发快速旋转
     # ════════════════════════════════════════════════════════════════
 
     def _fire_cross(self) -> list[Bullet]:
-        """交叉弹幕：两条旋转的子弹线，呈 X 形交叉。"""
-        bullets: list[Bullet] = []
-        cx = self.rect.centerx
-        cy = self.rect.bottom
-
-        self._cross_angle += 0.15 * self._get_phase_speed_mult()
-        n = 6  # 每条线 6 发
-        speed_mult = self._get_phase_speed_mult()
-        base_speed = BOSS_BULLET_SPEED * 0.65 * speed_mult
-
+        bullets = []
+        cx, cy = self.rect.centerx, self.rect.bottom
+        self._cross_angle += 0.25 * self._get_phase_speed_mult()
+        n = 10
+        spd = BOSS_BULLET_SPEED * 0.7 * self._get_phase_speed_mult()
         for side in (0, 1):
-            offset = side * math.pi  # 两条线相差 180°
+            off = side * math.pi
             for i in range(n):
-                spread = (i - (n - 1) / 2) * 0.08
-                angle = self._cross_angle + offset + spread
-                vx = math.cos(angle) * base_speed
-                vy = math.sin(angle) * base_speed
-                # 确保子弹有向下的分量
-                if vy < 0.1:
-                    vy = 0.1
+                spread = (i - (n - 1) / 2) * 0.06
+                a = self._cross_angle + off + spread
+                vx = math.cos(a) * spd
+                vy = max(math.sin(a) * spd, spd * 0.05)
                 b = Bullet(cx, cy, BulletSource.ENEMY, direction=1,
-                           speed=base_speed, damage=BOSS_BULLET_DAMAGE, style="elite")
-                b._vx = vx
-                b._vy = vy
+                           speed=spd, damage=BOSS_BULLET_DAMAGE, style="elite")
+                b._vx, b._vy = vx, vy
+                b._custom_velocity = True
+                bullets.append(b)
+        return bullets
+
+    # ════════════════════════════════════════════════════════════════
+    # ⭐ 弹幕墙 — 水平一排扫过屏幕
+    # ════════════════════════════════════════════════════════════════
+
+    def _fire_wall(self) -> list[Bullet]:
+        """弹幕墙：覆盖整个宽度的水平子弹排。"""
+        bullets = []
+        cy = self.rect.bottom
+        n = 20
+        spd = BOSS_BULLET_SPEED * 0.5
+        for i in range(n):
+            x = (i + 0.5) * SCREEN_WIDTH / n
+            b = Bullet(int(x), int(cy), BulletSource.ENEMY, direction=1,
+                       speed=spd, damage=BOSS_BULLET_DAMAGE, style="normal")
+            b._vx, b._vy = 0, spd
+            b._custom_velocity = True
+            bullets.append(b)
+        if self._combat_phase in (self.PHASE_2, self.PHASE_3):
+            for i in range(n):
+                x = (i + 0.5) * SCREEN_WIDTH / n + SCREEN_WIDTH / n / 2
+                if x > SCREEN_WIDTH:
+                    continue
+                b = Bullet(int(x), int(cy - 20), BulletSource.ENEMY, direction=1,
+                           speed=spd * 0.85, damage=BOSS_BULLET_DAMAGE, style="normal")
+                b._vx, b._vy = 0, spd * 0.85
                 b._custom_velocity = True
                 bullets.append(b)
         return bullets

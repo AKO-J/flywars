@@ -158,6 +158,9 @@ class UISystem:
         current_wave: int = 0,
         total_waves: int = 0,
         has_boss: bool = False,
+        # ⭐ 升级经验信息
+        xp_current: int = 0,
+        xp_next: int = 1,
     ) -> None:
         """绘制全部 UI 层。"""
         # ⭐ 用 spawner 的真实关卡更新显示
@@ -165,7 +168,8 @@ class UISystem:
             self._current_level = spawner_level
             self._level_up_timer = LEVEL_UP_DISPLAY_TIME
         self._draw_hud(screen, player, score, enemy_count, spawner_counts,
-                       spawner_level, current_wave, total_waves, has_boss)
+                       spawner_level, current_wave, total_waves, has_boss,
+                       xp_current, xp_next)
         self._draw_powerup_indicator(screen, player)
         # ⭐ 连击显示
         self._draw_combo(screen, combo_text, combo_count, combo_multiplier)
@@ -310,13 +314,15 @@ class UISystem:
         current_wave: int = 0,
         total_waves: int = 0,
         has_boss: bool = False,
+        xp_current: int = 0,
+        xp_next: int = 1,
     ) -> None:
         """左上角 HUD：HP条 → 蓄力 → 分数 → 关卡/波次 → 敌机统计"""
         x0, y = 8, 8
         pad = 6
 
         # ── 半透明面板背景（加高以容纳波次信息）──
-        panel_w, panel_h = 220, 170
+        panel_w, panel_h = 220, 200
         draw_panel(screen, (x0 - pad, y - pad, panel_w, panel_h), alpha=200)
 
         # ── 第1行：HP 条（分段式）──
@@ -424,6 +430,31 @@ class UISystem:
             t = self._font_small.render(f"{label}{count}", True, color)
             screen.blit(t, (ex, y))
             ex += t.get_width() + 6
+
+        # ── 第6行：经验值条（⭐ 升级可视化）──
+        y += 18
+        xp_bar_w, xp_bar_h = 160, 6
+        if xp_next > 0:
+            ratio = min(1.0, xp_current / max(xp_next, 1))
+        else:
+            ratio = 1.0
+        # 背景暗槽
+        pygame.draw.rect(screen, (20, 20, 30), (x0, y, xp_bar_w, xp_bar_h))
+        # 填充（蓝色渐变）
+        if ratio > 0:
+            fill_w = int(xp_bar_w * ratio)
+            for i in range(fill_w):
+                progress = i / max(xp_bar_w, 1)
+                r = int(40 + 80 * progress)
+                g = int(120 + 80 * progress)
+                b = int(200 + 55 * progress)
+                screen.set_at((x0 + i, y), (r, g, b))
+                screen.set_at((x0 + i, y + 1), (r, g, b))
+        # 边框
+        pygame.draw.rect(screen, (60, 60, 80), (x0, y, xp_bar_w, xp_bar_h), width=1)
+        # 文字
+        xp_label = self._font_small.render(f"EXP {xp_current}/{xp_next}", True, (140, 180, 220))
+        screen.blit(xp_label, (x0 + xp_bar_w + 6, y - 1))
 
     # ================================================================
     # 飘字得分

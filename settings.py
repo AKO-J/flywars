@@ -187,21 +187,21 @@ BOSS_SCORE: int = 1000
 BOSS_WIDTH: int = 150
 BOSS_HEIGHT: int = 62
 # Boss 弹幕发射间隔（秒）⭐ 全部缩短 → 弹幕更密
-BOSS_FIRE_INTERVAL_CIRCLE: float = 1.6    # 原2.0 → 圆形弹幕更密集
-BOSS_FIRE_INTERVAL_AIMED: float = 1.2     # 原1.5 → 瞄准弹幕更频繁
-BOSS_FIRE_INTERVAL_SPIRAL: float = 0.06   # 原0.08 → 螺旋弹幕更密
+BOSS_FIRE_INTERVAL_CIRCLE: float = 1.0    # 原1.6 → 圆形弹幕更密集
+BOSS_FIRE_INTERVAL_AIMED: float = 0.8     # 原1.2 → 瞄准弹幕更频繁
+BOSS_FIRE_INTERVAL_SPIRAL: float = 0.04   # 原0.06 → 螺旋弹幕更密
 # Boss 进入阶段：从顶部移动到目标Y位置的时间（秒）
 BOSS_ENTER_DURATION: float = 2.0
 # Boss 巡逻左右边界（像素，距边缘）
 BOSS_PATROL_MARGIN: int = 60
 # Boss 子弹伤害
 BOSS_BULLET_DAMAGE: int = 1
-# Boss 子弹速度（像素/秒）
-BOSS_BULLET_SPEED: float = 220.0          # 原200 → 更快
+# Boss 子弹速度（像素/秒）⭐ 原220→350，弹幕才够紧迫
+BOSS_BULLET_SPEED: float = 350.0
 # Boss 扇形弹幕（题19）
-BOSS_FAN_COUNT: int = 16                  # 原12 → 更多弹头
-BOSS_FAN_ANGLE: float = 120.0             # 原110° → 更宽角度
-BOSS_FAN_INTERVAL: float = 1.8            # 原2.2 → 更频繁
+BOSS_FAN_COUNT: int = 24                  # 原16 → 更多弹头
+BOSS_FAN_ANGLE: float = 100.0             # 原120° → 收窄更密集
+BOSS_FAN_INTERVAL: float = 1.2            # 原1.8 → 更频繁
 # Boss 死亡特效（题19）
 BOSS_EXPLOSION_COUNT: int = 10      # Boss 死亡时生成爆炸数量
 BOSS_EXPLOSION_DELAY: float = 0.10  # 连续爆炸间隔（秒）
