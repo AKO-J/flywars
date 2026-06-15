@@ -183,8 +183,9 @@ class ScrollingBackground:
         self._transition_progress: float = 1.0  # 0.0=过渡中, 1.0=完成
         self._prev_layers: list[list[Star]] = []
         self._prev_overlay: pygame.Surface | None = None
-        # 初始化
-        self._build_from_theme(THEME_STARFIELD)
+        # 初始化（🐛 修复：之前返回值没赋值导致空背景闪退）
+        self._layers = self._build_from_theme(THEME_STARFIELD)
+        self._overlay = self._make_overlay(THEME_STARFIELD)
 
     def _build_from_theme(self, theme: BackgroundTheme) -> list[list[Star]]:
         """根据主题配置生成星层，返回层列表。"""

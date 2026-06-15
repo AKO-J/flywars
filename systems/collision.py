@@ -65,7 +65,7 @@ class CollisionSystem:
         self.combo_bonus_texts: list[tuple[int, int, int]] = []
         # ⭐ 空间哈希（精灵数多时启用）
         self._spatial: SpatialHash = SpatialHash(cell_size=64)
-        self._spatial_enabled: bool = True
+        self._spatial_enabled: bool = False  # ⚠ 暂时禁用空间哈希（配对格式与 groupcollide 不兼容）
 
         # ⭐ Combo 连击系统
         self.combo_count: int = 0           # 当前连击数
@@ -184,6 +184,9 @@ class CollisionSystem:
                 continue
             for enemy in enemy_list:
                 if not enemy.alive():
+                    continue
+                # ⭐ 类型保护：确保 enemy 确实是 Enemy 实例
+                if not hasattr(enemy, 'take_damage'):
                     continue
                 # 穿透弹：同一敌机本帧只命中一次
                 if bullet.piercing:

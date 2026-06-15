@@ -242,6 +242,12 @@ class Game:
         self._joystick_deadzone: float = 0.25
         self._init_joystick()
 
+        # ---- ⭐ 关卡通提示效果 ----
+        self._level_transition_alpha: float = 0.0       # 过渡遮罩透明度
+        self._level_transition_timer: float = 0.0       # 过渡持续计时
+        self._level_transition_text: str = ""           # 显示的关卡文字
+        self._level_transition_scale: float = 0.0       # 文字缩放动画
+
         # ---- ⭐ 回放系统 ----
         self._replay_recorder: ReplayRecorder = ReplayRecorder()
         self._replay_player: ReplayPlayer | None = None
@@ -904,6 +910,28 @@ class Game:
         if self._screen_shake > 0:
             self._screen_shake = max(0.0, self._screen_shake - self.dt * 20)
 
+        # ⭐ 关卡通提示动画
+        if self._level_transition_timer > 0:
+            self._level_transition_timer -= self.dt
+            # 透明度：先闪入再渐出
+            if self._level_transition_timer > 2.0:
+                self._level_transition_alpha = min(200,
+                    self._level_transition_alpha + self.dt * 300)
+            elif self._level_transition_timer < 1.5:
+                self._level_transition_alpha = max(0,
+                    self._level_transition_alpha - self.dt * 150)
+            # 文字缩放动画：从 0 → 1.2 → 1.0
+            if self._level_transition_timer > 2.0:
+                self._level_transition_scale = min(1.2,
+                    self._level_transition_scale + self.dt * 1.5)
+            else:
+                self._level_transition_scale = max(0.8,
+                    self._level_transition_scale - self.dt * 0.3)
+            if self._level_transition_timer <= 0:
+                self._level_transition_timer = 0
+                self._level_transition_alpha = 0
+                self._level_transition_text = ""
+
         # ── 远程玩家位置插值平滑（题10）──
         if (self._remote_player_pos and self._remote_display_pos
                 and self.state == GameState.PLAYING):
@@ -962,6 +990,19 @@ class Game:
                 gl = GameLogger.get_instance()
                 gl.info("背景主题切换", level=new_level,
                         theme=self.background.current_theme.name)
+            # ⭐ 关卡通提示：闪屏 + 大字（如果过渡已在播放，只更新文字，不重置动画）
+            if self._level_transition_timer > 0:
+                # 过渡中再次升级：刷新文字，动画不重置
+                self._level_transition_text = f"—— 第 {new_level} 关 ——"
+                # 仍给一点点额外时间，避免刚显示就消失
+                self._level_transition_timer = max(self._level_transition_timer, 1.5)
+            else:
+                # 全新过渡：完整动画
+                self._level_transition_alpha = 200
+                self._level_transition_timer = 2.5
+                self._level_transition_text = f"—— 第 {new_level} 关 ——"
+                self._level_transition_scale = 0.0
+                self._screen_shake = max(self._screen_shake, 4.0)
 
         # ---- 生成敌机 / Boss ----
         new_boss = self.spawner.update(self.dt, self.enemies, self.all_sprites)
@@ -1146,7 +1187,7 @@ class Game:
         from settings import POWERUP_COLORS
         _PICKUP_LABELS: dict[PowerUpType, str] = {
             PowerUpType.HEALTH: "+1 HP",
-            PowerUpType.BOMB: "清屏!",
+            PowerUpType.BOMB: "💣 +1",
             PowerUpType.DOUBLE_DAMAGE: "双倍伤害",
             PowerUpType.TRIPLE_SPREAD: "三向散射",
             PowerUpType.PIERCE: "穿透弹",
@@ -1156,8 +1197,12 @@ class Game:
             result = self.player.apply_powerup(pu.powerup_type)
             # 拾取飘字
             label = _PICKUP_LABELS.get(pu.powerup_type, "")
+            if result == "bomb_full":
+                label = "💣 MAX"
             if label:
                 color = POWERUP_COLORS.get(pu.powerup_type, WHITE)
+                if result == "bomb_full":
+                    color = (80, 80, 80)
                 self.ui.add_pickup_text(pu.rect.centerx, pu.rect.centery, label, color)
             # 拾取光圈
             glow = Explosion(pu.rect.centerx, pu.rect.centery, "normal")
@@ -1168,13 +1213,7 @@ class Game:
             self.particles.pickup_glow(pu.rect.centerx, pu.rect.centery, pu_color)
 
             if result == "bomb":
-                # ⭐ 改为仅增加炸弹库存，不再立即引爆
-                self.ui.add_floating_text(pu.rect.centerx, pu.rect.centery,
-                                          "💣 +1", color=(255, 200, 60))
-            elif result == "bomb_full":
-                # 炸弹已满，显示提示
-                self.ui.add_floating_text(pu.rect.centerx, pu.rect.centery,
-                                          "💣 MAX", color=(80, 80, 80))
+                pass  # 已通过飘字显示 💣 +1
             elif result == "health":
                 self.audio.play_shoot()
             elif result == "buff":
@@ -1249,6 +1288,30 @@ class Game:
             shaken = self.screen.copy()
             self.screen.fill(BLACK)
             self.screen.blit(shaken, (sx, sy))
+
+        # ⭐ 关卡通提示：闪屏 + 大字
+        if self._level_transition_timer > 0 and self._level_transition_alpha > 0:
+            # 全屏闪白
+            flash = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            flash_alpha = min(180, int(self._level_transition_alpha * 0.6))
+            flash.fill((255, 255, 255, flash_alpha))
+            self.screen.blit(flash, (0, 0))
+            # 大字 "第 N 关"
+            try:
+                big_font = pygame.font.Font(UI_FONT_PATH, max(36, int(60 * self._level_transition_scale)))
+            except Exception:
+                big_font = pygame.font.Font(None, max(36, int(60 * self._level_transition_scale)))
+            # 根据背景主题用不同颜色
+            theme = self.background.current_theme
+            text_color = theme.accent_color if hasattr(theme, 'accent_color') else (100, 200, 255)
+            text_surf = big_font.render(self._level_transition_text, True, text_color)
+            text_rect = text_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 20))
+            # 发光效果
+            glow_surf = big_font.render(self._level_transition_text, True, (255, 255, 255))
+            glow_surf.set_alpha(40)
+            glow_rect = glow_surf.get_rect(center=(SCREEN_WIDTH // 2 + 3, SCREEN_HEIGHT // 2 - 17))
+            self.screen.blit(glow_surf, glow_rect)
+            self.screen.blit(text_surf, text_rect)
 
         self._draw_log_panel()
         self._draw_chat_ui()  # 聊天系统 UI（题13）
@@ -2382,6 +2445,9 @@ class Game:
         self._entering_name = False
         self._name_buffer = ""
         self._screen_shake = 0.0
+        self._level_transition_timer = 0.0
+        self._level_transition_alpha = 0.0
+        self._level_transition_text = ""
         self._last_sent_x = float(self.player.rect.centerx)
         self._last_sent_y = float(self.player.rect.centery)
 
