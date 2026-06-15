@@ -1162,6 +1162,9 @@ class Game:
             self.powerups.add(pu)
             self.all_sprites.add(pu)
 
+        # ⭐ 道具磁吸：玩家靠近时自动吸附
+        self._update_powerup_magnet()
+
         # ---- 道具拾取检测 ----
         self._handle_powerup_collection()
 
@@ -1520,6 +1523,22 @@ class Game:
 
         # ⑤ clear/draw 流程保证了精灵旧位置擦除 + 层级排序 + dirty 追踪
         #    最终 flip 由 render() 统一调用，确保 FPS 文字等也一并刷新
+
+    def _update_powerup_magnet(self) -> None:
+        """道具自动吸附：玩家靠近 150px 内时飞向玩家。"""
+        if not self.powerups or self.player is None:
+            return
+        px, py = self.player.rect.centerx, self.player.rect.centery
+        for pu in list(self.powerups):
+            if not pu.alive():
+                continue
+            dx = px - pu.rect.centerx
+            dy = py - pu.rect.centery
+            dist = (dx * dx + dy * dy) ** 0.5
+            if dist < 150.0 and dist > 2:
+                speed = 400.0 * (1.0 - dist / 150.0 * 0.5)
+                pu.rect.x += (dx / dist) * speed * self.dt
+                pu.rect.y += (dy / dist) * speed * self.dt
 
     def _draw_wave_info(self) -> None:
         """在屏幕右上角显示关卡/波次信息。"""

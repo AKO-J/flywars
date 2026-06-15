@@ -15,17 +15,13 @@ from settings import (
 )
 
 
-# ==========================================================================
-# 星星
-# ==========================================================================
-
 class Star:
     __slots__ = ("x", "y", "size", "speed", "color")
 
     def __init__(self, x, y, size, speed, brightness, color=(0, 0, 0)):
         self.x, self.y = x, y
         self.size, self.speed = size, speed
-        self.color = (brightness, brightness, brightness) if color == (0, 0, 0) else color
+        self.color = color if color != (0, 0, 0) else (brightness,) * 3
 
     def update(self, dt):
         self.y += self.speed * dt
@@ -38,10 +34,20 @@ class Star:
             screen.set_at((int(self.x), int(self.y)), self.color)
         else:
             pygame.draw.circle(screen, self.color, (int(self.x), int(self.y)), self.size)
+            # ⭐ 大星星加柔光
+            if self.size >= 4:
+                glow = pygame.Surface((self.size * 4, self.size * 4), pygame.SRCALPHA)
+                for i in range(self.size * 2, 0, -1):
+                    a = max(1, 20 - i)
+                    r2 = i // 2
+                    if r2 > 0:
+                        pygame.draw.circle(glow, (*self.color[:3], a),
+                                         (self.size * 2, self.size * 2), r2)
+                screen.blit(glow, (int(self.x) - self.size * 2, int(self.y) - self.size * 2))
 
 
 # ═══════════════════════════════════════════════════════════════════
-# ⭐ 动态元素
+# 动态元素
 # ═══════════════════════════════════════════════════════════════════
 
 class NebulaCloud:
@@ -61,40 +67,44 @@ class NebulaCloud:
         self.speed_y = random.uniform(2, 6)
         self.pulse_speed = random.uniform(0.2, 0.5)
         self.pulse_offset = random.uniform(0, math.pi * 2)
-        self._surf = None
+        self._cached_surf = None
+        self._build_surface()
 
-    def update(self, dt, time_s):
-        self.x += self.speed_x * dt
-        self.y += self.speed_y * dt
-        # 缠绕回另一边
-        margin = -self.radius - 50
-        if self.x > SCREEN_WIDTH + self.radius + 50:
-            self.x = margin
-        elif self.x < margin:
-            self.x = SCREEN_WIDTH + self.radius + 50
-        if self.y > SCREEN_HEIGHT + self.radius + 50:
-            self.y = margin
-        elif self.y < margin:
-            self.y = SCREEN_HEIGHT + self.radius + 50
-        # 脉冲呼吸
-        self._surf = None  # 重建标记
-
-    def draw(self, screen, time_s):
-        pulse = 0.7 + 0.3 * math.sin(time_s * self.pulse_speed + self.pulse_offset)
-        r = int(self.radius * pulse)
-        alpha = int(self.alpha * pulse)
-        if r <= 0 or alpha <= 0:
-            return
-        # 用缓存的 surface（逐帧重建性能也不差，因为数量少）
+    def _build_surface(self):
+        r = self.radius
         surf = pygame.Surface((r * 2, r * 2), pygame.SRCALPHA)
         for i in range(r, 0, -1):
-            a = int(alpha * (1.0 - i / r))
+            a = int(self.alpha * (1.0 - i / r))
             if a <= 0:
                 continue
             ratio = i / r
             c = tuple(min(255, int(cv * (0.3 + 0.7 * ratio))) for cv in self.color)
             pygame.draw.circle(surf, (*c, a), (r, r), i)
-        screen.blit(surf, (int(self.x) - r, int(self.y) - r))
+        self._cached_surf = surf
+        self._cached_r = r
+
+    def update(self, dt, time_s):
+        self.x += self.speed_x * dt
+        self.y += self.speed_y * dt
+        m = -self.radius - 50
+        if self.x > SCREEN_WIDTH + 50: self.x = m
+        elif self.x < m: self.x = SCREEN_WIDTH + 50
+        if self.y > SCREEN_HEIGHT + 50: self.y = m
+        elif self.y < m: self.y = SCREEN_HEIGHT + 50
+
+    def draw(self, screen, time_s):
+        pulse = 0.7 + 0.3 * math.sin(time_s * self.pulse_speed + self.pulse_offset)
+        r = int(self.radius * pulse)
+        if r <= 0 or self._cached_surf is None:
+            return
+        scale = r / self._cached_r
+        if abs(scale - 1.0) > 0.05:
+            s = pygame.transform.scale(self._cached_surf,
+                (int(self._cached_surf.get_width() * scale),
+                 int(self._cached_surf.get_height() * scale)))
+        else:
+            s = self._cached_surf
+        screen.blit(s, (int(self.x) - s.get_width() // 2, int(self.y) - s.get_height() // 2))
 
 
 class ShootingStar:
@@ -102,7 +112,7 @@ class ShootingStar:
 
     def __init__(self):
         self.reset()
-        self.timer = random.uniform(2, 8)  # 出现间隔
+        self.timer = random.uniform(2, 8)
 
     def reset(self):
         self.active = False
@@ -110,7 +120,7 @@ class ShootingStar:
         self.x = random.uniform(0, SCREEN_WIDTH * 0.7)
         self.y = random.uniform(-30, SCREEN_HEIGHT * 0.3)
         self.speed = random.uniform(400, 700)
-        self.angle = random.uniform(0.4, 0.9)  # 与水平夹角
+        self.angle = random.uniform(0.4, 0.9)
         self.length = random.randint(40, 100)
         self.brightness = random.randint(180, 255)
         self.lifetime = random.uniform(0.15, 0.4)
@@ -120,17 +130,9 @@ class ShootingStar:
             self.timer -= dt
             if self.timer <= 0:
                 self.active = True
-                self.start_x = self.x
-                self.start_y = self.y
                 self.age = 0.0
-                # 重置位置
                 self.x = random.uniform(0, SCREEN_WIDTH * 0.7)
                 self.y = random.uniform(-30, SCREEN_HEIGHT * 0.3)
-                self.angle = random.uniform(0.4, 0.9)
-                self.speed = random.uniform(400, 700)
-                self.length = random.randint(40, 100)
-                self.brightness = random.randint(180, 255)
-                self.lifetime = random.uniform(0.15, 0.4)
             return
         self.age += dt
         if self.age > self.lifetime:
@@ -149,99 +151,145 @@ class ShootingStar:
         alpha = int(self.brightness * (1.0 - progress))
         if alpha <= 0:
             return
-        # 尾迹渐变：用 Surface 支持 alpha
-        segments = 10
-        for i in range(segments):
-            t = i / segments
-            seg_alpha = int(alpha * (1.0 - t))
-            if seg_alpha <= 0:
-                continue
+        for i in range(10):
+            t = i / 10
+            a = int(alpha * (1.0 - t))
+            if a <= 0: continue
             sx = int(self.x - math.cos(self.angle) * self.length * t)
             sy = int(self.y - math.sin(self.angle) * self.length * t)
             sw = max(1, int(2 * (1.0 - t)))
-            # ⭐ 用 Surface 支持半透明
             dot = pygame.Surface((sw * 2, sw * 2), pygame.SRCALPHA)
-            pygame.draw.circle(dot, (255, 255, 255, seg_alpha), (sw, sw), sw)
+            pygame.draw.circle(dot, (255, 255, 255, a), (sw, sw), sw)
             screen.blit(dot, (sx - sw, sy - sw))
 
 
 class CelestialBody:
-    """天体（行星/恒星）— 缓慢横穿画面，带光晕。"""
+    """天体 — 3种类型：气态巨行星/岩石卫星/带环行星，带自转和淡入淡出。"""
+
+    TYPES = ("gas_giant", "rocky", "ringed")
 
     def __init__(self, theme_color):
-        self.reset(theme_color)
+        self.body_type = random.choice(self.TYPES)
+        self.radius = random.randint(25, 50)
         self.active = False
-        self.appear_timer = random.uniform(5, 15)
+        self.appear_timer = random.uniform(10, 25)
+        self.rotation = 0.0
+        self.rot_speed = random.uniform(0.3, 1.0)
+        self.fade_in = 0.0
+        self.fade_out = 0.0
+        self._last_color = theme_color
+        self._surf = None
+        self._build(theme_color)
 
-    def reset(self, theme_color=None):
+    def _build(self, base):
+        r = self.radius
+        s = pygame.Surface((r * 4, r * 4), pygame.SRCALPHA)
+        cx, cy = r * 2, r * 2
+        base = base or (200, 180, 150)
+
+        if self.body_type == "gas_giant":
+            # 气态巨行星：彩色条纹 + 极地暗区
+            bands = [base,
+                     (min(255, base[0]+50), max(0, base[1]-20), base[2]),
+                     (max(0, base[0]-20), min(255, base[1]+50), base[2])]
+            for y in range(-r, r):
+                bw = int((r*r - y*y)**0.5) if abs(y) < r else 0
+                if bw < 2: continue
+                c = bands[(y + r) * len(bands) // (r * 2) % len(bands)]
+                wob = random.randint(-1, 1)
+                pygame.draw.line(s, c, (cx-bw+wob, cy+y), (cx+bw+wob, cy+y), 3)
+            # 极地区域变暗
+            for off, dr in [(0, -1), (r*2, 1)]:
+                for i in range(r//3):
+                    a = int(30 * (1 - i/(r//3)))
+                    pygame.draw.circle(s, (0, 0, 0, a), (r, off + i*dr), r, 2)
+
+        elif self.body_type == "rocky":
+            gray = sum(base) // 3
+            pygame.draw.circle(s, (gray,)*3, (cx, cy), r)
+            random.seed(hash(tuple(base)) & 0xFFFF)
+            for _ in range(random.randint(5, 10)):
+                cx_ = random.randint(cx-r+6, cx+r-6)
+                cy_ = random.randint(cy-r+6, cy+r-6)
+                cr = random.randint(3, max(3, r//4))
+                d = ((cx_-cx)**2 + (cy_-cy)**2)**0.5
+                if d + cr > r: continue
+                pygame.draw.circle(s, (max(0,gray-40),)*3, (cx_, cy_), cr)
+                pygame.draw.circle(s, (min(255,gray+50),)*3, (cx_, cy_), cr, 1)
+
+        elif self.body_type == "ringed":
+            pygame.draw.circle(s, base, (cx, cy), r)
+            for i in range(int(r*1.8), r, -1):
+                a = max(1, int(22 * (1 - i/(r*1.8))))
+                ew = int(i * 0.35)
+                rs = pygame.Surface((i*2, ew*2), pygame.SRCALPHA)
+                rc = (min(255, base[0]+70), min(255, base[1]+50),
+                      min(255, base[2]+90), a)
+                pygame.draw.ellipse(rs, rc, (0, 0, i*2, ew*2), 2)
+                s.blit(rs, (cx-i, cy-ew))
+
+        # 大气光晕
+        for i in range(5, 0, -1):
+            a = max(1, 18 - i*3)
+            gc = (min(255, base[0]+30), min(255, base[1]+30),
+                  min(255, base[2]+50), a)
+            pygame.draw.circle(s, gc, (cx, cy), r + i*5, 2)
+
+        # 高光
+        hl = pygame.Surface((r*2, r*2), pygame.SRCALPHA)
+        pygame.draw.circle(hl, (255, 255, 255, 30), (r, r), r)
+        s.blit(hl, (cx-r, cy-r))
+        self._surf = s
+
+    def reset(self, color=None):
         side = random.choice(["left", "right", "top"])
+        m = self.radius * 2
         if side == "left":
-            self.x = -80
-            self.y = random.uniform(50, SCREEN_HEIGHT * 0.4)
-            self.vx = random.uniform(3, 6)
-            self.vy = random.uniform(0.2, 0.8)
+            self.x, self.y = -m, random.uniform(60, SCREEN_HEIGHT*0.3)
+            self.vx, self.vy = random.uniform(4, 10), random.uniform(-0.5, 1.5)
         elif side == "right":
-            self.x = SCREEN_WIDTH + 80
-            self.y = random.uniform(50, SCREEN_HEIGHT * 0.4)
-            self.vx = random.uniform(-6, -3)
-            self.vy = random.uniform(0.2, 0.8)
+            self.x, self.y = SCREEN_WIDTH+m, random.uniform(60, SCREEN_HEIGHT*0.3)
+            self.vx, self.vy = random.uniform(-10, -4), random.uniform(-0.5, 1.5)
         else:
-            self.x = random.uniform(50, SCREEN_WIDTH - 50)
-            self.y = -80
-            self.vx = random.uniform(-1, 1)
-            self.vy = random.uniform(2, 5)
-        self.radius = random.randint(15, 35)
-        # 颜色从主题色派生
-        if theme_color:
-            base = theme_color
-        else:
-            base = (200, 180, 150)
-        self.color = (
-            min(255, base[0] + random.randint(-30, 30)),
-            min(255, base[1] + random.randint(-30, 30)),
-            min(255, base[2] + random.randint(-30, 30)),
-        )
-        self.glow_color = (
-            min(255, self.color[0] + 40),
-            min(255, self.color[1] + 40),
-            min(255, self.color[2] + 40),
-        )
-        self.glow_alpha = 30
+            self.x, self.y = random.uniform(100, SCREEN_WIDTH-100), -m
+            self.vx, self.vy = random.uniform(-2, 2), random.uniform(3, 8)
+        self.rotation = 0.0
+        self.fade_in = 0.0
+        self.fade_out = 0.0
+        self.rot_speed = random.uniform(0.3, 1.0)
 
     def update(self, dt):
         if not self.active:
             self.appear_timer -= dt
             if self.appear_timer <= 0:
                 self.active = True
+                self.body_type = random.choice(self.TYPES)
+                self.radius = random.randint(25, 50)
+                self._build(self._last_color)
+                self.reset(self._last_color)
             return
         self.x += self.vx * dt
         self.y += self.vy * dt
-        # 超出屏幕后重新计时
-        if (self.x < -150 or self.x > SCREEN_WIDTH + 150
-                or self.y < -150 or self.y > SCREEN_HEIGHT + 150):
+        self.rotation += self.rot_speed * dt
+        if self.fade_in < 1.0:
+            self.fade_in = min(1.0, self.fade_in + dt * 1.2)
+        m = self.radius * 3
+        if self.x < -m+40 or self.x > SCREEN_WIDTH+m-40 or self.y < -m+40 or self.y > SCREEN_HEIGHT+m-40:
+            self.fade_out = min(1.0, self.fade_out + dt * 2)
+        if self.x < -m*2 or self.x > SCREEN_WIDTH+m*2 or self.y < -m*2 or self.y > SCREEN_HEIGHT+m*2:
             self.active = False
-            self.appear_timer = random.uniform(8, 20)
+            self.appear_timer = random.uniform(15, 35)
 
     def draw(self, screen):
-        if not self.active:
+        if not self.active or self._surf is None:
             return
-        ix, iy = int(self.x), int(self.y)
-        r = self.radius
-        # 外层光晕（合并成一个大 surface）
-        glow_r = r + 36
-        glow = pygame.Surface((glow_r * 2, glow_r * 2), pygame.SRCALPHA)
-        for i in range(3):
-            gr = r + (i + 1) * 12
-            ga = self.glow_alpha // (i + 1)
-            if ga > 0:
-                pygame.draw.circle(glow, (*self.glow_color, ga), (glow_r, glow_r), gr)
-        screen.blit(glow, (ix - glow_r, iy - glow_r))
-        # 星体本身
-        pygame.draw.circle(screen, self.color, (ix, iy), r)
-        # 高光
-        hl = pygame.Surface((r * 2, r * 2), pygame.SRCALPHA)
-        pygame.draw.circle(hl, (255, 255, 255, 40), (r, r), r)
-        screen.blit(hl, (ix - r, iy - r))
+        a = 255
+        if self.fade_in < 1.0: a = int(self.fade_in * 255)
+        if self.fade_out > 0: a = int(a * (1.0 - self.fade_out))
+        if a <= 0: return
+        rotated = pygame.transform.rotate(self._surf, self.rotation * 57.3)
+        rotated.set_alpha(a)
+        screen.blit(rotated, rotated.get_rect(center=(int(self.x), int(self.y))))
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -264,9 +312,9 @@ class BackgroundTheme:
 THEME_STARFIELD = BackgroundTheme(
     name="星空",
     layer_configs=[
-        (40, 1, 1, 0.3, 60, 120, (180, 200, 255)),
-        (25, 1, 2, 0.6, 100, 170, (200, 220, 255)),
-        (15, 2, 3, 1.0, 150, 255, (255, 255, 255)),
+        (40, 1, 2, 0.3, 60, 120, (180, 200, 255)),
+        (25, 2, 4, 0.6, 100, 170, (200, 220, 255)),
+        (15, 3, 6, 1.0, 150, 255, (255, 255, 255)),
     ],
     overlay_color=(0, 0, 20), overlay_alpha=12,
     accent_color=(100, 180, 255),
@@ -276,9 +324,9 @@ THEME_STARFIELD = BackgroundTheme(
 THEME_NEBULA = BackgroundTheme(
     name="星云",
     layer_configs=[
-        (50, 1, 2, 0.3, 40, 100, (200, 150, 255)),
-        (30, 1, 3, 0.6, 60, 140, (255, 200, 150)),
-        (20, 2, 4, 1.0, 100, 200, (255, 180, 100)),
+        (50, 1, 3, 0.3, 40, 100, (200, 150, 255)),
+        (30, 2, 5, 0.6, 60, 140, (255, 200, 150)),
+        (20, 3, 7, 1.0, 100, 200, (255, 180, 100)),
     ],
     overlay_color=(30, 10, 40), overlay_alpha=20,
     accent_color=(200, 150, 255),
@@ -288,9 +336,9 @@ THEME_NEBULA = BackgroundTheme(
 THEME_RED_ALERT = BackgroundTheme(
     name="警戒",
     layer_configs=[
-        (30, 1, 1, 0.3, 40, 80, (180, 60, 60)),
-        (20, 1, 2, 0.6, 60, 120, (220, 80, 80)),
-        (10, 2, 3, 1.0, 80, 180, (255, 100, 50)),
+        (30, 1, 2, 0.3, 40, 80, (180, 60, 60)),
+        (20, 2, 4, 0.6, 60, 120, (220, 80, 80)),
+        (10, 3, 6, 1.0, 80, 180, (255, 100, 50)),
     ],
     overlay_color=(40, 0, 0), overlay_alpha=25,
     accent_color=(255, 80, 80),
@@ -317,8 +365,6 @@ def get_theme_for_level(level):
 # ═══════════════════════════════════════════════════════════════════
 
 class ScrollingBackground:
-    """多层视差背景 + 关卡主题 + ⭐ 动态元素。"""
-
     def __init__(self):
         self._layers = []
         self._overlay = None
@@ -326,9 +372,8 @@ class ScrollingBackground:
         self._transition_progress = 1.0
         self._prev_layers = []
         self._prev_overlay = None
-        self._time = 0.0  # 累计时间（用于动画）
+        self._time = 0.0
 
-        # ⭐ 动态元素
         self._nebula_clouds: list[NebulaCloud] = []
         self._shooting_stars: list[ShootingStar] = []
         self._celestial_body: CelestialBody | None = None
@@ -337,8 +382,7 @@ class ScrollingBackground:
         self._overlay = self._make_overlay(THEME_STARFIELD)
         self._init_dynamic(THEME_STARFIELD)
 
-    def _init_dynamic(self, theme: BackgroundTheme):
-        """根据主题初始化动态元素。"""
+    def _init_dynamic(self, theme):
         self._nebula_clouds = [NebulaCloud() for _ in range(theme.nebula_count)]
         self._shooting_stars = [ShootingStar() for _ in range(2)]
         self._celestial_body = CelestialBody(theme.accent_color)
@@ -346,61 +390,55 @@ class ScrollingBackground:
     def _build_from_theme(self, theme):
         layers = []
         for cfg in theme.layer_configs:
-            count, min_size, max_size, speed_factor, min_bright, max_bright = cfg[:6]
-            color_hint = cfg[6] if len(cfg) > 6 else None
+            count, min_size, max_size, sf, mb, Mb = cfg[:6]
+            hint = cfg[6] if len(cfg) > 6 else None
             layer = []
-            layer_speed = BACKGROUND_BASE_SPEED * speed_factor
+            spd = BACKGROUND_BASE_SPEED * sf
             for _ in range(count):
-                x = random.uniform(0, SCREEN_WIDTH)
-                y = random.uniform(0, SCREEN_HEIGHT)
-                size = random.randint(min_size, max_size)
-                brightness = random.randint(min_bright, max_bright)
-                star = Star(x, y, size, layer_speed, brightness)
-                if color_hint:
-                    br = brightness / 255.0
-                    star.color = tuple(min(255, int(c * br)) for c in color_hint)
-                layer.append(star)
+                s = Star(random.uniform(0, SCREEN_WIDTH),
+                         random.uniform(0, SCREEN_HEIGHT),
+                         random.randint(min_size, max_size), spd,
+                         random.randint(mb, Mb))
+                if hint:
+                    br = s.color[0] / 255.0
+                    s.color = tuple(min(255, int(c * br)) for c in hint)
+                layer.append(s)
             layers.append(layer)
         return layers
 
     def _make_overlay(self, theme):
         if theme.overlay_alpha <= 0:
             return None
-        surf = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        surf.fill((*theme.overlay_color, theme.overlay_alpha))
-        return surf
+        s = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        s.fill((*theme.overlay_color, theme.overlay_alpha))
+        return s
 
     def _pulse_overlay(self):
-        """叠加层呼吸脉冲 — 随时间轻微变化透明度。"""
         if self._overlay is None:
             return None
         pulse = 0.85 + 0.15 * math.sin(self._time * 0.5)
-        alpha = max(0, self._current_theme.overlay_alpha)
-        pulsed = int(alpha * pulse)
-        if pulsed == alpha:
+        a = int(self._current_theme.overlay_alpha * pulse)
+        if a == self._current_theme.overlay_alpha:
             return self._overlay
-        surf = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        surf.fill((*self._current_theme.overlay_color, pulsed))
-        return surf
+        s = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        s.fill((*self._current_theme.overlay_color, a))
+        return s
 
     def set_theme_by_level(self, level):
-        new_theme = get_theme_for_level(level)
-        if new_theme is self._current_theme:
+        new = get_theme_for_level(level)
+        if new is self._current_theme:
             return False
         self._prev_layers = self._layers
         self._prev_overlay = self._overlay
-        self._current_theme = new_theme
-        self._layers = self._build_from_theme(new_theme)
-        self._overlay = self._make_overlay(new_theme)
+        self._current_theme = new
+        self._layers = self._build_from_theme(new)
+        self._overlay = self._make_overlay(new)
         self._transition_progress = 0.0
-        # ⭐ 重新初始化动态元素
-        self._init_dynamic(new_theme)
+        self._init_dynamic(new)
         return True
 
     def update(self, dt):
         self._time += dt
-
-        # 主题过渡
         if self._transition_progress < 1.0:
             self._transition_progress = min(1.0, self._transition_progress + dt * 0.5)
             for layer in self._prev_layers:
@@ -408,67 +446,58 @@ class ScrollingBackground:
                     star.update(dt)
         else:
             self._prev_layers.clear()
-
-        # 星星
         for layer in self._layers:
             for star in layer:
                 star.update(dt)
-
-        # ⭐ 星云云团
-        for cloud in self._nebula_clouds:
-            cloud.update(dt, self._time)
-
-        # ⭐ 流星
-        for star in self._shooting_stars:
-            star.update(dt)
-
-        # ⭐ 天体
+        for c in self._nebula_clouds:
+            c.update(dt, self._time)
+        for s in self._shooting_stars:
+            s.update(dt)
         if self._celestial_body:
             self._celestial_body.update(dt)
 
     def draw(self, screen):
-        # 星星 — 过渡期混合绘制
+        # 星星 + 过渡
         if self._transition_progress < 1.0 and self._prev_layers:
             for layer in self._prev_layers:
                 for star in layer:
-                    alpha = int(255 * (1.0 - self._transition_progress))
-                    if alpha > 0:
-                        orig = star.color
-                        star.color = tuple(int(c * alpha / 255) for c in orig)
-                        star.draw(screen)
-                        star.color = orig
+                    a = int(255 * (1.0 - self._transition_progress))
+                    if a <= 0: continue
+                    orig = star.color
+                    star.color = tuple(int(c * a / 255) for c in orig)
+                    star.draw(screen)
+                    star.color = orig
             for layer in self._layers:
                 for star in layer:
-                    alpha = int(255 * self._transition_progress)
-                    if alpha > 0:
-                        orig = star.color
-                        star.color = tuple(int(c * alpha / 255) for c in orig)
-                        star.draw(screen)
-                        star.color = orig
+                    a = int(255 * self._transition_progress)
+                    if a <= 0: continue
+                    orig = star.color
+                    star.color = tuple(int(c * a / 255) for c in orig)
+                    star.draw(screen)
+                    star.color = orig
         else:
             for layer in self._layers:
                 for star in layer:
                     star.draw(screen)
 
-        # ⭐ 星云云团（在星星之上、天体之下）
-        for cloud in self._nebula_clouds:
-            cloud.draw(screen, self._time)
+        # 星云
+        for c in self._nebula_clouds:
+            c.draw(screen, self._time)
 
-        # ⭐ 天体
+        # 天体
         if self._celestial_body:
             self._celestial_body.draw(screen)
 
-        # ⭐ 流星（最上层）
-        for star in self._shooting_stars:
-            star.draw(screen)
+        # 流星
+        for s in self._shooting_stars:
+            s.draw(screen)
 
-        # ⭐ 呼吸脉冲叠加层
+        # 呼吸叠加
         pulsed = self._pulse_overlay()
         if pulsed:
             screen.blit(pulsed, (0, 0))
 
     def draw_rect(self, screen, rect):
-        """脏矩形局部擦除 — 只画星星（动态元素由全屏渲染处理）。"""
         clip = rect.clip(screen.get_rect())
         if clip.width <= 0 or clip.height <= 0:
             return
@@ -478,13 +507,10 @@ class ScrollingBackground:
             layers.extend(self._prev_layers)
         layers.extend(self._layers)
         for layer in layers:
-            for star in layer:
-                sr = pygame.Rect(
-                    int(star.x) - star.size, int(star.y) - star.size,
-                    star.size * 2, star.size * 2,
-                )
+            for s in layer:
+                sr = pygame.Rect(int(s.x)-s.size, int(s.y)-s.size, s.size*2, s.size*2)
                 if sr.colliderect(clip):
-                    star.draw(screen)
+                    s.draw(screen)
 
     @property
     def current_theme(self):
@@ -492,8 +518,7 @@ class ScrollingBackground:
 
 
 class BackgroundCallback:
-    def __init__(self, bg: ScrollingBackground):
+    def __init__(self, bg):
         self._bg = bg
-
     def __call__(self, surface, rect):
         self._bg.draw_rect(surface, rect)
