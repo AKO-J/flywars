@@ -346,6 +346,9 @@ class Game:
         if key == pygame.K_F4 and (pygame.key.get_mods() & pygame.KMOD_ALT):
             self.running = False
             return
+        if key == pygame.K_F1:
+            self.player.toggle_hitbox_visible()
+            return
         if key == pygame.K_F2:
             self._spawn_stress_test_enemies()
             return
@@ -1254,6 +1257,7 @@ class Game:
 
         self.player.draw_charge_bar(self.screen)
         self.player.draw_powerup_glow(self.screen)
+        self.player.draw_hitbox(self.screen)
 
         if self._boss is not None and self._boss.alive():
             self._boss.draw_hp_bar(self.screen)
@@ -1371,6 +1375,7 @@ class Game:
         # ④ 叠加 UI 元素
         self.player.draw_charge_bar(self.screen)
         self.player.draw_powerup_glow(self.screen)
+        self.player.draw_hitbox(self.screen)
         charge_rect = pygame.Rect(
             self.player.rect.left - 1,
             self.player.rect.top - 15,

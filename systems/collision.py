@@ -209,12 +209,12 @@ class CollisionSystem:
         player: Player,
         enemies_group: pygame.sprite.Group,
     ) -> None:
+        # ⭐ 使用 4px 判定点替代整个 rect 碰撞
+        hitbox = player.hitbox
         if self._spatial_enabled and len(enemies_group) > 20:
             candidates = self._spatial.get_candidates(player, enemies_group)
         else:
-            candidates = pygame.sprite.spritecollide(
-                player, enemies_group, dokill=False
-            )
+            candidates = [e for e in enemies_group if e.alive() and hitbox.colliderect(e.rect)]
         for enemy in candidates:
             if not enemy.alive():
                 continue
@@ -244,7 +244,7 @@ class CollisionSystem:
                 continue
             if not bullet.alive():
                 continue
-            if player.rect.colliderect(bullet.rect):
+            if player.hitbox.colliderect(bullet.rect):
                 bullet.kill()
                 player.take_damage(bullet.damage)
 

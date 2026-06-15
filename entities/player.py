@@ -119,6 +119,11 @@ class Player(pygame.sprite.DirtySprite):
         self._auto_fire_interval: float = PLAYER_AUTO_FIRE_INTERVAL
         self._is_firing: bool = False     # 是否按住射击键
 
+        # ⭐ 自机判定点（4×4 超小 hitbox，经典 STG 手感）
+        self._hitbox: pygame.Rect = pygame.Rect(0, 0, 4, 4)
+        self._hitbox.center = self.rect.center
+        self._show_hitbox: bool = False   # F1 切换显示
+
         # ================================================================
         # 输入状态标记位（KEYDOWN/KEYUP 方案）
         # ================================================================
@@ -209,6 +214,9 @@ class Player(pygame.sprite.DirtySprite):
 
         # ⑤ 朝向切换
         self._update_orientation(move_left, move_right)
+
+        # ⭐ 同步判定点位置
+        self._hitbox.center = self.rect.center
 
     def _update_charge(self, dt: float) -> None:
         """
@@ -668,6 +676,21 @@ class Player(pygame.sprite.DirtySprite):
     def is_dead(self) -> bool:
         """玩家是否已死亡"""
         return self.hp <= 0
+
+    @property
+    def hitbox(self) -> pygame.Rect:
+        """返回判定点矩形（供碰撞检测使用）"""
+        return self._hitbox
+
+    def toggle_hitbox_visible(self) -> None:
+        """F1 切换判定点可视化"""
+        self._show_hitbox = not self._show_hitbox
+
+    def draw_hitbox(self, screen: pygame.Surface) -> None:
+        """绘制判定点（调试用，F1 切換）"""
+        if self._show_hitbox:
+            pygame.draw.circle(screen, WHITE, self._hitbox.center, 3, width=1)
+            pygame.draw.circle(screen, (255, 255, 255, 80), self._hitbox.center, 8, width=1)
 
     def draw_hp_bar(self, screen: pygame.Surface) -> None:
         """
