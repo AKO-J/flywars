@@ -126,7 +126,7 @@ CHARGE_THRESHOLD_TRIPLE: float = 0.80
 DOUBLE_SHOT_SPACING: int = 10
 
 # 敌人子弹速度（像素/秒）
-ENEMY_BULLET_SPEED: float = 250.0
+ENEMY_BULLET_SPEED: float = 380.0
 # 敌人子弹伤害
 ENEMY_BULLET_DAMAGE: int = 1
 # 敌人子弹尺寸
@@ -245,40 +245,40 @@ EnemyWaveType = Literal["normal", "fast", "elite", "tracking"]
 # ⭐ 编队阵型默认参数
 FORMATION_DEFAULTS: dict[str, dict] = {
     "line": {
-        "spacing": 45,
-        "width": 320,
-        "entry_y": -60,
-        "angle": 0,
-    },
-    "vshape": {
-        "spacing": 40,
-        "width": 280,
-        "entry_y": -60,
-        "angle": 25,
-    },
-    "triangle": {
-        "spacing": 38,
-        "width": 260,
+        "spacing": 60,
+        "width": 450,
         "entry_y": -80,
         "angle": 0,
     },
-    "arc": {
-        "spacing": 35,
-        "width": 300,
-        "entry_y": -40,
-        "angle": 60,
-    },
-    "cross": {
-        "spacing": 40,
-        "width": 280,
-        "entry_y": -60,
+    "vshape": {
+        "spacing": 55,
+        "width": 400,
+        "entry_y": -80,
         "angle": 30,
     },
-    "surround": {
+    "triangle": {
+        "spacing": 60,
+        "width": 400,
+        "entry_y": -100,
+        "angle": 0,
+    },
+    "arc": {
         "spacing": 45,
-        "width": 360,
-        "entry_y": -40,
-        "angle": 20,
+        "width": 380,
+        "entry_y": -80,
+        "angle": 150,
+    },
+    "cross": {
+        "spacing": 55,
+        "width": 400,
+        "entry_y": -80,
+        "angle": 35,
+    },
+    "surround": {
+        "spacing": 60,
+        "width": 500,
+        "entry_y": -60,
+        "angle": 25,
     },
 }
 
@@ -385,6 +385,8 @@ LEVEL_WAVES: dict[int, dict] = {
 WAVE_REST_DURATION: float = 2.0
 # 波次推进提示显示时间
 WAVE_ANNOUNCE_DURATION: float = 1.5
+# ⭐ 阵型波次敌机生成间隔（秒）— 快速序列，让编队可见
+FORMATION_SPAWN_INTERVAL: float = 0.12
 # 飘字得分：上浮速度（像素/秒）
 FLOATING_TEXT_SPEED: float = 80.0
 # 飘字得分：存在时间（秒）

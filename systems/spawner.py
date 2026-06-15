@@ -31,7 +31,7 @@ from settings import (
     SPAWN_INTERVAL_MIN,
     LEVEL_WAVES, WAVE_REST_DURATION, WAVE_ANNOUNCE_DURATION,
     FINAL_BOSS_LEVEL,
-    FormationType, FORMATION_DEFAULTS,
+    FormationType, FORMATION_DEFAULTS, FORMATION_SPAWN_INTERVAL,
 )
 from sprites.enemy import NormalEnemy, FastEnemy, EliteEnemy, TrackingEnemy, BossEnemy
 
@@ -74,6 +74,7 @@ class Spawner:
         # 当前波次尚未生成的敌机队列（随机排列）
         self._spawn_queue: list[str] = []
         self._spawn_positions: list[tuple[float, float]] = []  # ⭐ 阵型位置队列
+        self._is_formation_wave: bool = False  # ⭐ 当前波次是否为阵型波
         self._spawn_timer: float = 0.0
 
         # 波间休息
@@ -136,6 +137,7 @@ class Spawner:
         self._wave_index = 0
         self._spawn_queue.clear()
         self._spawn_positions.clear()
+        self._is_formation_wave = False
         self._spawn_timer = 0.0
         self._rest_timer = 0.0
         self._is_resting = False
@@ -248,10 +250,11 @@ class Spawner:
             self._rest_timer = WAVE_REST_DURATION
             return new_boss
 
-        # ---- 生成敌机（⭐ 支持阵型位置） ----
+        # ---- 生成敌机（⭐ 支持阵型位置 + 阵型快速序列） ----
         self._spawn_timer += dt
-        if self._spawn_timer >= self._spawn_interval and self._spawn_queue:
-            self._spawn_timer -= self._spawn_interval
+        current_interval = FORMATION_SPAWN_INTERVAL if self._is_formation_wave else self._spawn_interval
+        if self._spawn_timer >= current_interval and self._spawn_queue:
+            self._spawn_timer -= current_interval
             etype = self._spawn_queue.pop(0)
             # 取阵型位置（如果有的话）
             pos_x = pos_y = None
@@ -298,6 +301,7 @@ class Spawner:
             random.shuffle(flat)
             self._spawn_queue = flat
             self._spawn_positions = []
+            self._is_formation_wave = False
         else:
             # 有阵型：计算位置，保持顺序（先出先入阵）
             merged = {**FORMATION_DEFAULTS[formation_name], **params}
@@ -306,6 +310,7 @@ class Spawner:
             )
             self._spawn_queue = flat
             self._spawn_positions = positions
+            self._is_formation_wave = True
 
         self._spawn_timer = 0.0
 
@@ -342,11 +347,11 @@ class Spawner:
                 positions.append((x, cy + (i % 2) * 8))  # 微微交错
 
         elif formation == "vshape":
-            # V字楔形：中间低，两边高
+            # V字楔形：中间低，两边高（增加深度让V更明显）
             for i in range(count):
                 t = -1.0 + 2.0 * i / (count - 1) if count > 1 else 0.0
                 x = cx + t * width / 2
-                y = cy + abs(t) * spacing * 0.8
+                y = cy + abs(t) * spacing * 1.2
                 positions.append((x, y))
 
         elif formation == "triangle":
@@ -366,14 +371,14 @@ class Spawner:
                 row += 1
 
         elif formation == "arc":
-            # 弧线：在圆弧上均匀分布
-            radius = width / 2
-            angle_range = math.radians(params.get("angle", 60))
-            start_angle = math.pi - angle_range / 2
+            # 弧线：彩虹弧（宽幅水平展开）
+            half_range = width / 2
             for i in range(count):
-                a = start_angle + i * (angle_range / (count - 1))
-                x = cx + radius * math.cos(a)
-                y = cy + radius * math.sin(a) * 0.5
+                t = -1.0 + 2.0 * i / (count - 1) if count > 1 else 0.0
+                x = cx + t * half_range
+                # y 在中间高两边低（拱形）
+                depth = abs(t) * spacing * 0.6
+                y = cy + depth
                 positions.append((x, y))
 
         elif formation == "cross":
@@ -383,14 +388,12 @@ class Spawner:
                 if i < half:
                     t = -1.0 + 2.0 * i / (half - 1) if half > 1 else 0.0
                     x = cx + t * width / 2
-                    y = cy + abs(t) * spacing * 0.6
+                    y = cy + abs(t) * spacing * 1.2
                 else:
                     idx = i - half
                     t = -1.0 + 2.0 * idx / (count - half - 1) if (count - half) > 1 else 0.0
                     x = cx + t * width / 2
-                    y = cy + (1.0 - abs(t)) * spacing * 0.8
-                    # 水平偏移微调让两条线错开
-                    x += spacing * 0.15 * (-1 if idx % 2 == 0 else 1)
+                    y = cy + (1.0 - abs(t)) * spacing * 1.2
                 positions.append((x, y))
 
         elif formation == "surround":

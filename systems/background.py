@@ -187,22 +187,30 @@ class ShootingStar:
 
 
 class CelestialBody:
-    """天体 — 3种类型：气态巨行星/岩石卫星/带环行星，带自转和淡入淡出。"""
+    """天体 — 3种类型，不同深度，带弧度轨迹，从各个方向掠过。"""
 
     TYPES = ("gas_giant", "rocky", "ringed")
 
-    def __init__(self, theme_color):
+    def __init__(self, theme_color, depth=0):
+        """depth: 0=近(大/快), 1=中, 2=远(小/慢)"""
+        self.depth = depth
+        depth_factor = {0: 1.0, 1: 0.65, 2: 0.4}[depth]
         self.body_type = random.choice(self.TYPES)
-        self.radius = random.randint(25, 50)
+        self.radius = int(random.randint(25, 55) * depth_factor)
+        self.radius = max(self.radius, 12)
         self.active = False
-        self.appear_timer = random.uniform(10, 25)
+        self.appear_timer = random.uniform(3, 12) * (1 + depth * 0.5)
         self.rotation = 0.0
-        self.rot_speed = random.uniform(0.3, 1.0)
+        self.rot_speed = random.uniform(0.2, 0.8) * (1.5 - depth * 0.3)
         self.fade_in = 0.0
         self.fade_out = 0.0
         self._last_color = theme_color
         self._surf = None
         self._build(theme_color)
+        # ⭐ 弧度轨迹参数
+        self._curve_amp = 0.0       # 弧度振幅
+        self._curve_freq = 0.0      # 弧度频率
+        self._travel_dist = 0.0     # 累计行进距离
 
     def _build(self, base):
         r = self.radius
@@ -211,7 +219,6 @@ class CelestialBody:
         base = base or (200, 180, 150)
 
         if self.body_type == "gas_giant":
-            # 气态巨行星：彩色条纹 + 极地暗区
             bands = [base,
                      (min(255, base[0]+50), max(0, base[1]-20), base[2]),
                      (max(0, base[0]-20), min(255, base[1]+50), base[2])]
@@ -220,8 +227,7 @@ class CelestialBody:
                 if bw < 2: continue
                 c = bands[(y + r) * len(bands) // (r * 2) % len(bands)]
                 wob = random.randint(-1, 1)
-                pygame.draw.line(s, c, (cx-bw+wob, cy+y), (cx+bw+wob, cy+y), 3)
-            # 极地区域变暗
+                pygame.draw.line(s, c, (cx-bw+wob, cy+y), (cx+bw+wob, cy+y), max(2, r//10))
             for off, dr in [(0, -1), (r*2, 1)]:
                 for i in range(r//3):
                     a = int(30 * (1 - i/(r//3)))
@@ -251,35 +257,57 @@ class CelestialBody:
                 pygame.draw.ellipse(rs, rc, (0, 0, i*2, ew*2), 2)
                 s.blit(rs, (cx-i, cy-ew))
 
-        # 大气光晕
         for i in range(5, 0, -1):
             a = max(1, 18 - i*3)
             gc = (min(255, base[0]+30), min(255, base[1]+30),
                   min(255, base[2]+50), a)
             pygame.draw.circle(s, gc, (cx, cy), r + i*5, 2)
 
-        # 高光
         hl = pygame.Surface((r*2, r*2), pygame.SRCALPHA)
         pygame.draw.circle(hl, (255, 255, 255, 30), (r, r), r)
         s.blit(hl, (cx-r, cy-r))
         self._surf = s
 
     def reset(self, color=None):
-        side = random.choice(["left", "right", "top"])
-        m = self.radius * 2
-        if side == "left":
-            self.x, self.y = -m, random.uniform(60, SCREEN_HEIGHT*0.3)
-            self.vx, self.vy = random.uniform(4, 10), random.uniform(-0.5, 1.5)
-        elif side == "right":
-            self.x, self.y = SCREEN_WIDTH+m, random.uniform(60, SCREEN_HEIGHT*0.3)
-            self.vx, self.vy = random.uniform(-10, -4), random.uniform(-0.5, 1.5)
-        else:
-            self.x, self.y = random.uniform(100, SCREEN_WIDTH-100), -m
-            self.vx, self.vy = random.uniform(-2, 2), random.uniform(3, 8)
+        """从随机方向进入，带随机弧度。"""
+        dirs = ["left", "right", "top", "bottom",
+                "topleft", "topright", "bottomleft", "bottomright"]
+        entry = random.choice(dirs)
+        m = self.radius * 3
+        margin = random.uniform(-m, m)
+
+        if entry == "left":
+            self.x, self.y = -m, random.uniform(0, SCREEN_HEIGHT)
+            self.vx, self.vy = random.uniform(30, 80), random.uniform(-20, 20)
+        elif entry == "right":
+            self.x, self.y = SCREEN_WIDTH+m, random.uniform(0, SCREEN_HEIGHT)
+            self.vx, self.vy = random.uniform(-80, -30), random.uniform(-20, 20)
+        elif entry == "top":
+            self.x, self.y = random.uniform(0, SCREEN_WIDTH), -m
+            self.vx, self.vy = random.uniform(-15, 15), random.uniform(30, 80)
+        elif entry == "bottom":
+            self.x, self.y = random.uniform(0, SCREEN_WIDTH), SCREEN_HEIGHT+m
+            self.vx, self.vy = random.uniform(-15, 15), random.uniform(-80, -30)
+        elif "left" in entry:
+            self.x, self.y = -m, -m if "top" in entry else SCREEN_HEIGHT+m
+            self.vx, self.vy = random.uniform(40, 100), random.uniform(30, 60) * (1 if "top" in entry else -1)
+        else:  # right variants
+            self.x, self.y = SCREEN_WIDTH+m, -m if "top" in entry else SCREEN_HEIGHT+m
+            self.vx, self.vy = random.uniform(-100, -40), random.uniform(30, 60) * (1 if "top" in entry else -1)
+
+        # ⭐ 根据不同深度缩放速度
+        depth_speed = {0: 1.0, 1: 0.7, 2: 0.45}[self.depth]
+        self.vx *= depth_speed
+        self.vy *= depth_speed
+
+        # ⭐ 弧度轨迹：小幅正弦摆动
+        self._curve_amp = random.uniform(10, 40) * depth_speed
+        self._curve_freq = random.uniform(0.5, 2.0)
+        self._travel_dist = 0.0
+
         self.rotation = 0.0
         self.fade_in = 0.0
         self.fade_out = 0.0
-        self.rot_speed = random.uniform(0.3, 1.0)
 
     def update(self, dt):
         if not self.active:
@@ -287,21 +315,40 @@ class CelestialBody:
             if self.appear_timer <= 0:
                 self.active = True
                 self.body_type = random.choice(self.TYPES)
-                self.radius = random.randint(25, 50)
+                self.radius = int(random.uniform(20, 50) * {0:1.0, 1:0.65, 2:0.4}[self.depth])
+                self.radius = max(self.radius, 10)
                 self._build(self._last_color)
                 self.reset(self._last_color)
             return
-        self.x += self.vx * dt
-        self.y += self.vy * dt
+
+        # ⭐ 弧度轨迹
+        speed = (self.vx**2 + self.vy**2)**0.5
+        self._travel_dist += speed * dt
+        curve_offset = math.sin(self._travel_dist * self._curve_freq * 0.01) * self._curve_amp
+        angle = math.atan2(self.vy, self.vx)
+        perp_x = -math.sin(angle) * curve_offset * dt
+        perp_y = math.cos(angle) * curve_offset * dt
+
+        self.x += (self.vx + perp_x) * dt
+        self.y += (self.vy + perp_y) * dt
         self.rotation += self.rot_speed * dt
+
+        # 淡入
         if self.fade_in < 1.0:
-            self.fade_in = min(1.0, self.fade_in + dt * 1.2)
+            self.fade_in = min(1.0, self.fade_in + dt * 1.5)
+        # 接近边缘时淡出
         m = self.radius * 3
-        if self.x < -m+40 or self.x > SCREEN_WIDTH+m-40 or self.y < -m+40 or self.y > SCREEN_HEIGHT+m-40:
-            self.fade_out = min(1.0, self.fade_out + dt * 2)
-        if self.x < -m*2 or self.x > SCREEN_WIDTH+m*2 or self.y < -m*2 or self.y > SCREEN_HEIGHT+m*2:
+        edge_dist = min(
+            self.x + m if self.vx < 0 else SCREEN_WIDTH + m - self.x,
+            self.y + m if self.vy < 0 else SCREEN_HEIGHT + m - self.y,
+        )
+        if edge_dist < 100:
+            self.fade_out = min(1.0, self.fade_out + dt * 2.5)
+        # 完全出屏后重置
+        if (self.x < -m*3 or self.x > SCREEN_WIDTH+m*3
+                or self.y < -m*3 or self.y > SCREEN_HEIGHT+m*3):
             self.active = False
-            self.appear_timer = random.uniform(15, 35)
+            self.appear_timer = random.uniform(4, 15) * (1 + self.depth * 0.5)
 
     def draw(self, screen):
         if not self.active or self._surf is None:
@@ -399,7 +446,7 @@ class ScrollingBackground:
 
         self._nebula_clouds: list[NebulaCloud] = []
         self._shooting_stars: list[ShootingStar] = []
-        self._celestial_body: CelestialBody | None = None
+        self._celestial_bodies: list[CelestialBody] = []
 
         self._layers = self._build_from_theme(THEME_STARFIELD)
         self._overlay = self._make_overlay(THEME_STARFIELD)
@@ -408,7 +455,11 @@ class ScrollingBackground:
     def _init_dynamic(self, theme):
         self._nebula_clouds = [NebulaCloud() for _ in range(theme.nebula_count)]
         self._shooting_stars = [ShootingStar() for _ in range(2)]
-        self._celestial_body = CelestialBody(theme.accent_color)
+        # ⭐ 多天体：3-4 个不同深度
+        self._celestial_bodies = [
+            CelestialBody(theme.accent_color, depth=d)
+            for d in range(3)
+        ]
 
     def _build_from_theme(self, theme):
         layers = []
@@ -476,8 +527,8 @@ class ScrollingBackground:
             c.update(dt, self._time)
         for s in self._shooting_stars:
             s.update(dt)
-        if self._celestial_body:
-            self._celestial_body.update(dt)
+        for body in self._celestial_bodies:
+            body.update(dt)
 
     def draw(self, screen):
         # 星星 + 过渡
@@ -508,8 +559,8 @@ class ScrollingBackground:
             c.draw(screen, self._time)
 
         # 天体
-        if self._celestial_body:
-            self._celestial_body.draw(screen)
+        for body in self._celestial_bodies:
+            body.draw(screen)
 
         # 流星
         for s in self._shooting_stars:

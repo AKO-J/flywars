@@ -927,6 +927,63 @@ class Player(pygame.sprite.DirtySprite):
             return True
         return False
 
+    # ====================================================================
+    # ⭐ 成长视觉特效 — 根据升级等级显示机身光效
+    # ====================================================================
+
+    def draw_upgrade_aura(self, screen: pygame.Surface) -> None:
+        """
+        根据永久升级等级在机身周围绘制光效。
+        总等级 = hp + damage + charge + speed + spread + shield。
+        """
+        # 计算总升级等级 = 各属性之和（用阈值字段反推）
+        total_hp = max(0, self.max_hp - PLAYER_MAX_HP)
+        # 粗略估算：用 visible 属性推断等级
+        total = total_hp
+        if self._extra_damage > 0:
+            total += self._extra_damage
+        if self._charge_time < PLAYER_CHARGE_TIME:
+            total += 1
+            if self._charge_time < PLAYER_CHARGE_TIME * 0.5:
+                total += 1
+        if self._armor > 0:
+            total += 1
+
+        if total < 3:
+            return  # 低等级无光效
+
+        cx, cy = self.rect.center
+        t = time.time()
+        radius = max(self.rect.width, self.rect.height)
+
+        # 根据总等级选择颜色和强度
+        if total >= 12:
+            colors = [(255, 50, 100), (255, 200, 50), (100, 150, 255)]
+            base_alpha = 60
+            pulse = 1.2
+        elif total >= 8:
+            colors = [(100, 200, 255), (200, 100, 255)]
+            base_alpha = 45
+            pulse = 1.1
+        elif total >= 5:
+            colors = [(100, 255, 200)]
+            base_alpha = 30
+            pulse = 1.0
+        else:
+            colors = [(150, 200, 255)]
+            base_alpha = 20
+            pulse = 1.0
+
+        for i, color in enumerate(colors):
+            r = int(radius * (pulse + 0.15 * math.sin(t * 3 + i * 1.5)))
+            alpha = int(base_alpha * (0.6 + 0.4 * math.sin(t * 4 + i * 2.0)))
+            glow_surf = pygame.Surface((r * 2, r * 2), pygame.SRCALPHA)
+            pygame.draw.circle(
+                glow_surf, (*color, alpha), (r, r), r - i * 4,
+                width=max(2, 4 - i),
+            )
+            screen.blit(glow_surf, (cx - r, cy - r))
+
     def draw_hitbox(self, screen: pygame.Surface) -> None:
         """绘制判定点（调试用，F1 切換）"""
         if self._show_hitbox:

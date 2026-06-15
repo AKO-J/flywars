@@ -1394,6 +1394,7 @@ class Game:
 
         self.player.draw_charge_bar(self.screen)
         self.player.draw_powerup_glow(self.screen)
+        self.player.draw_upgrade_aura(self.screen)
         self.player.draw_hitbox(self.screen)
 
         if self._boss is not None and self._boss.alive():
@@ -1514,6 +1515,7 @@ class Game:
         # ④ 叠加 UI 元素
         self.player.draw_charge_bar(self.screen)
         self.player.draw_powerup_glow(self.screen)
+        self.player.draw_upgrade_aura(self.screen)
         self.player.draw_hitbox(self.screen)
         charge_rect = pygame.Rect(
             self.player.rect.left - 1,

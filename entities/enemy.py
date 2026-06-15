@@ -308,8 +308,14 @@ class EliteEnemy(Enemy):
         # 连射状态
         self._burst_remaining: int = 0
         self._burst_timer: float = 0.0
+        self._burst_index: int = 0  # ⭐ 连射第几发（用于散布递增）
         # 玩家引用（用于瞄准射击）
         self._player: pygame.sprite.Sprite | None = None
+        # ⭐ 玩家速度追踪（预测瞄准）
+        self._last_px: float = 0.0
+        self._last_py: float = 0.0
+        self._player_vx: float = 0.0
+        self._player_vy: float = 0.0
 
     def set_player(self, player_sprite: pygame.sprite.Sprite) -> None:
         """设置玩家引用（用于瞄准射击）"""
@@ -332,13 +338,22 @@ class EliteEnemy(Enemy):
         """
         精英敌机连射：一次触发发射多枚子弹（burst）。
         ────────────────────────────────────────
-        覆盖基类 fire() 以支持 burst：
+        覆盖基类 fire() 以支持 burst + 预测瞄准：
         每次射击间隔触发连射（ENEMY_ELITE_BURST_COUNT 发）。
+        第1发精确预测，后续散布递增封锁走位。
         """
         if self._fire_interval <= 0:
             return []
 
         self._fire_timer += dt
+
+        # ⭐ 追踪玩家速度（用于预测瞄准）
+        if self._player is not None:
+            px, py = self._player.rect.centerx, self._player.rect.centery
+            if self._last_px != 0:
+                self._player_vx = (px - self._last_px) / max(dt, 0.001)
+                self._player_vy = (py - self._last_py) / max(dt, 0.001)
+            self._last_px, self._last_py = px, py
 
         # 处理连射中剩余子弹
         if self._burst_remaining > 0:
@@ -347,7 +362,8 @@ class EliteEnemy(Enemy):
             while self._burst_timer >= ENEMY_ELITE_BURST_INTERVAL and self._burst_remaining > 0:
                 self._burst_timer -= ENEMY_ELITE_BURST_INTERVAL
                 self._burst_remaining -= 1
-                b = self._do_fire_aimed()
+                self._burst_index += 1
+                b = self._do_fire_aimed(self._burst_index)
                 if b:
                     bullets.extend(b)
             return bullets
@@ -355,26 +371,45 @@ class EliteEnemy(Enemy):
         # 触发新的一轮射击
         if self._fire_timer >= self._fire_interval:
             self._fire_timer -= self._fire_interval
-            # 开始连射
             self._burst_remaining = ENEMY_ELITE_BURST_COUNT - 1
             self._burst_timer = 0.0
-            return self._do_fire_aimed()  # 第一发立即发射
+            self._burst_index = 0
+            return self._do_fire_aimed(0)  # 第1发精确瞄准
 
         return []
 
-    def _do_fire_aimed(self) -> list:
-        """发射一枚瞄准玩家的紫色子弹"""
-
-
+    def _do_fire_aimed(self, burst_index: int = 0) -> list:
+        """发射一枚瞄准玩家的紫色子弹（⭐ 预测瞄准 + 散布递增）"""
         cx, cy = self.rect.centerx, self.rect.bottom
 
         if self._player is not None:
-            dx = float(self._player.rect.centerx) - cx
-            dy = float(self._player.rect.centery) - cy
+            px, py = float(self._player.rect.centerx), float(self._player.rect.centery)
+            dx, dy = px - cx, py - cy
             dist = math.hypot(dx, dy)
             if dist < 1:
                 dx, dy = 0.0, 1.0
                 dist = 1.0
+            # ⭐ 第一发精确预测，后续散布递增
+            if burst_index == 0 and abs(self._player_vx) > 30:
+                fly_time = dist / 220.0
+                px += self._player_vx * fly_time * 0.6
+                py += self._player_vy * fly_time * 0.6
+                dx, dy = px - cx, py - cy
+                dist = math.hypot(dx, dy)
+                if dist < 1:
+                    dx, dy = 0.0, 1.0
+                    dist = 1.0
+            # 散布偏移（burst_index越大散越开）
+            spread = burst_index * 0.08  # 0, 0.08, 0.16 rad
+            if spread > 0:
+                cos_a, sin_a = math.cos(spread), math.sin(spread)
+                ndx = dx * cos_a - dy * sin_a
+                ndy = dx * sin_a + dy * cos_a
+                dx, dy = ndx, ndy
+                dist = math.hypot(dx, dy)
+                if dist < 1:
+                    dx, dy = 0.0, 1.0
+                    dist = 1.0
             nx, ny = dx / dist, dy / dist
         else:
             nx, ny = 0.0, 1.0
@@ -413,6 +448,10 @@ class TrackingEnemy(Enemy):
                          fire_interval=fire_interval or ENEMY_TRACKING_FIRE_INTERVAL)
         # 玩家引用（用于获取当前位置）
         self._player: pygame.sprite.Sprite | None = player_sprite
+        # ⭐ 预测拦截
+        self._last_target: tuple[float, float] | None = None
+        # ⭐ 编队包抄偏移（场上多架时自动分配左右）
+        self._flank_offset: float = random.choice([-70, 70])
 
     def set_player(self, player_sprite: pygame.sprite.Sprite) -> None:
         """设置/更新玩家引用"""
@@ -420,34 +459,50 @@ class TrackingEnemy(Enemy):
 
     def _move(self, dt: float) -> None:
         """
-        追踪移动：向玩家当前位置移动。
+        追踪移动：预测拦截 + 编队包抄。
         ————————————————————————————————
-        每帧计算从自身到玩家的方向向量，
-        以固定速度沿该方向移动。
-
-        如果玩家不存在，则直线下落。
+        ① 估算玩家速度 → 预测未来位置
+        ② 场上多架追踪敌机时自动左右包抄
+        ③ 近身时切换直接追击
         """
         if self._player is None:
-            # 无目标 → 直线下落
             self._y += self.speed * dt
             return
 
-        # 目标位置（玩家 rect 中心）
         target_x: float = float(self._player.rect.centerx)
         target_y: float = float(self._player.rect.centery)
 
+        # ⭐ 预测拦截：根据玩家最近2帧速度估算提前量
+        if self._last_target is not None:
+            pvx = (target_x - self._last_target[0]) / max(dt, 0.001)
+            pvy = (target_y - self._last_target[1]) / max(dt, 0.001)
+            if abs(pvx) > 40 or abs(pvy) > 40:
+                dx_pred = target_x - self._x
+                dy_pred = target_y - self._y
+                dist_pred = math.hypot(dx_pred, dy_pred)
+                if dist_pred > 1:
+                    fly_time = dist_pred / max(self.speed, 1)
+                    target_x += pvx * fly_time * 0.5
+                    target_y += pvy * fly_time * 0.5
+        self._last_target = (float(self._player.rect.centerx),
+                             float(self._player.rect.centery))
+
+        # ⭐ 编队包抄：距玩家较远时左右散开，近身时合围
+        dx = target_x - self._x
+        dy = target_y - self._y
+        distance = math.hypot(dx, dy)
+        if distance > 150:
+            target_x += self._flank_offset  # 远距走侧翼
+        # 近身（< 120px）取消偏移，直接扑向玩家
         # 方向向量
-        dx: float = target_x - self._x
-        dy: float = target_y - self._y
-        distance: float = math.sqrt(dx * dx + dy * dy)
-
+        dx = target_x - self._x
+        dy = target_y - self._y
+        distance = math.hypot(dx, dy)
         if distance < 1.0:
-            return  # 已到达，停止移动
+            return
 
-        # 归一化方向 × 速度 × dt
         move_x: float = (dx / distance) * self.speed * dt
         move_y: float = (dy / distance) * self.speed * dt
-
         self._x += move_x
         self._y += move_y
 
@@ -526,8 +581,9 @@ class BossEnemy(Enemy):
         x = SCREEN_WIDTH // 2
         y = -BOSS_HEIGHT  # 从屏幕上方外进入
 
-        # Boss HP 随关卡缩放
-        hp = int(BOSS_HP * (DIFFICULTY_HP_SCALE ** (level - 3)))
+        # Boss HP 随关卡缩放（⭐ 独立缩放公式：最终 Boss 更有压迫感）
+        effective_level = max(0, level - 3)
+        hp = int(BOSS_HP * (1.25 ** effective_level))
 
         super().__init__(
             _get_boss_image(), x, y,
@@ -704,51 +760,74 @@ class BossEnemy(Enemy):
         self._fire_timer += dt
         bullets: list[Bullet] = []
 
-        # 根据当前战斗阶段和弹幕模式选择
-        if self._fire_mode == self.MODE_FAN:
-            interval = BOSS_FAN_INTERVAL * rate_mult
-            if self._fire_timer >= interval:
-                self._fire_timer = 0.0
-                bullets = self._fire_fan()
-                self._fire_mode = self.MODE_AIMED if self._combat_phase == self.PHASE_1 else self.MODE_CROSS
-
-        elif self._fire_mode == self.MODE_CIRCLE:
-            interval = BOSS_FIRE_INTERVAL_CIRCLE * rate_mult
-            if self._fire_timer >= interval:
-                self._fire_timer = 0.0
-                bullets = self._fire_circle()
-                self._fire_mode = self.MODE_FAN
-
-        elif self._fire_mode == self.MODE_AIMED:
-            interval = BOSS_FIRE_INTERVAL_AIMED * rate_mult
-            if self._fire_timer >= interval:
-                self._fire_timer = 0.0
-                bullets = self._fire_aimed()
-                self._fire_mode = self.MODE_SPIRAL if self._combat_phase == self.PHASE_1 else self.MODE_CIRCLE
-
-        elif self._fire_mode == self.MODE_CROSS:
-            """交叉弹幕（Phase 2+）：双向旋转交叉线。"""
-            interval = BOSS_FIRE_INTERVAL_AIMED * rate_mult * 0.8
-            if self._fire_timer >= interval:
-                self._fire_timer = 0.0
-                bullets = self._fire_cross()
-                self._fire_mode = self.MODE_SPIRAL
-
-        elif self._fire_mode == self.MODE_SPIRAL:
-            interval = BOSS_FIRE_INTERVAL_SPIRAL * rate_mult
-            if self._fire_timer >= interval:
-                self._fire_timer = 0.0
-                bullets = self._fire_spiral()
-                # 螺旋持续一段时间后切换
+        # ⭐ 加权随机弹幕选择（替代固定轮换）
+        interval = self._choose_bullet_interval()
+        if self._fire_timer >= interval:
+            self._fire_timer = 0.0
+            bullets = self._fire_selected_mode()
+            # 螺旋弹幕需要持续累积角度
+            if self._fire_mode == self.MODE_SPIRAL:
                 self._spiral_angle += 0.35 * self._get_phase_speed_mult()
-                spiral_max = 4.0 * math.pi
-                if self._combat_phase == self.PHASE_3:
-                    spiral_max = 6.0 * math.pi  # Phase 3 螺旋更久
+                spiral_max = 6.0 * math.pi if self._combat_phase == self.PHASE_3 else 4.0 * math.pi
                 if self._spiral_angle > spiral_max:
                     self._spiral_angle = 0.0
-                    self._fire_mode = self.MODE_CIRCLE
+            # 选择下一发弹幕
+            self._fire_mode = self._choose_next_mode()
 
         return bullets
+
+    def _choose_next_mode(self) -> str:
+        """基于玩家位置和战斗阶段加权随机选择下一发弹幕。"""
+        weights: dict[str, int] = {
+            self.MODE_FAN: 25,
+            self.MODE_CIRCLE: 25,
+            self.MODE_AIMED: 25,
+            self.MODE_SPIRAL: 10,
+        }
+        if self._combat_phase in (self.PHASE_2, self.PHASE_3):
+            weights[self.MODE_CROSS] = 20
+            weights[self.MODE_SPIRAL] = 20
+        if self._combat_phase == self.PHASE_3:
+            weights[self.MODE_SPIRAL] = 30
+            weights[self.MODE_CROSS] = 25
+            weights[self.MODE_FAN] = 15
+        # 根据玩家位置调整权重
+        if self._player is not None:
+            dx = abs(self._player.rect.centerx - self.rect.centerx)
+            dy = self._player.rect.centery - self.rect.centery
+            if dx < 60:  # 玩家在正下方 → 高概率瞄准+螺旋
+                weights[self.MODE_AIMED] += 20
+                weights[self.MODE_SPIRAL] += 10
+            if dy < 150:  # 玩家靠近Boss顶部 → 扇形封锁
+                weights[self.MODE_FAN] += 15
+                weights[self.MODE_CIRCLE] += 15
+        return random.choices(list(weights.keys()), weights=list(weights.values()))[0]
+
+    def _choose_bullet_interval(self) -> float:
+        """返回当前弹幕模式的发射间隔。"""
+        rate_mult = self._get_phase_fire_rate_mult()
+        intervals = {
+            self.MODE_FAN: BOSS_FAN_INTERVAL * rate_mult,
+            self.MODE_CIRCLE: BOSS_FIRE_INTERVAL_CIRCLE * rate_mult,
+            self.MODE_AIMED: BOSS_FIRE_INTERVAL_AIMED * rate_mult,
+            self.MODE_CROSS: BOSS_FIRE_INTERVAL_AIMED * rate_mult * 0.8,
+            self.MODE_SPIRAL: BOSS_FIRE_INTERVAL_SPIRAL * rate_mult,
+        }
+        return intervals.get(self._fire_mode, 0.5)
+
+    def _fire_selected_mode(self) -> list[Bullet]:
+        """执行当前弹幕模式的发射逻辑。"""
+        if self._fire_mode == self.MODE_FAN:
+            return self._fire_fan()
+        elif self._fire_mode == self.MODE_CIRCLE:
+            return self._fire_circle()
+        elif self._fire_mode == self.MODE_AIMED:
+            return self._fire_aimed()
+        elif self._fire_mode == self.MODE_CROSS:
+            return self._fire_cross()
+        elif self._fire_mode == self.MODE_SPIRAL:
+            return self._fire_spiral()
+        return []
 
     # ================================================================
     # 扇形弹幕（题19：向玩家方向扇形散射）
