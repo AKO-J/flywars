@@ -110,6 +110,10 @@ class Player(pygame.sprite.DirtySprite):
         # 道具 Buff 状态（题18）— 多个 Buff 可叠加，各自独立计时
         self._active_powerups: dict[PowerUpType, float] = {}
 
+        # ⭐ 永久升级加成（由 PlayerUpgradeSystem 设置）
+        self._extra_damage: int = 0       # 额外伤害
+        self._spread_upgrade: int = 0     # 额外弹幕扩散数
+
         # ================================================================
         # 输入状态标记位（KEYDOWN/KEYUP 方案）
         # ================================================================
@@ -355,7 +359,7 @@ class Player(pygame.sprite.DirtySprite):
         dmg_mult: int = 2 if PowerUpType.DOUBLE_DAMAGE in active else 1
         is_spread: bool = PowerUpType.TRIPLE_SPREAD in active
 
-        damage: int = PLAYER_BULLET_DAMAGE * dmg_mult
+        damage: int = (PLAYER_BULLET_DAMAGE + self._extra_damage) * dmg_mult
         base_x: float = float(self.rect.centerx)
         base_y: float = float(self.rect.top)
 
@@ -367,45 +371,44 @@ class Player(pygame.sprite.DirtySprite):
         else:
             bullet_style = "single"
 
+        # 弹幕扩散加成（永久升级）
+        spread_extra = self._spread_upgrade
+
         def mkbullet(x, y, style=None):
             return Bullet.create_player_bullet(
                 x=x, y=y, damage=damage, piercing=pierce,
                 style=style or bullet_style,
             )
 
+        def spread_bullets(count, center_x, base_y_pos):
+            """生成 count 枚水平扩散的子弹"""
+            if count == 1:
+                return [mkbullet(center_x, base_y_pos)]
+            bullets = []
+            spacing = 7
+            start = center_x - spacing * (count - 1) / 2.0
+            for i in range(count):
+                bx = start + spacing * i
+                by_offset = abs(i - (count - 1) / 2.0) * 0.5
+                bullets.append(mkbullet(bx, base_y_pos + int(by_offset)))
+            return bullets
+
         if is_spread:
-            # 三向散射 Buff：最低三发扇形，满蓄五发扇形
-            if charge >= CHARGE_THRESHOLD_TRIPLE:
-                return [
-                    mkbullet(base_x, base_y, style="triple"),
-                    mkbullet(base_x - 14, base_y + 2, style="double"),
-                    mkbullet(base_x + 14, base_y + 2, style="double"),
-                    mkbullet(base_x - 7, base_y + 1, style="single"),
-                    mkbullet(base_x + 7, base_y + 1, style="single"),
-                ]
-            else:
-                return [
-                    mkbullet(base_x, base_y, style="triple"),
-                    mkbullet(base_x - 12, base_y + 2, style="double"),
-                    mkbullet(base_x + 12, base_y + 2, style="double"),
-                ]
+            # 三向散射 Buff：最低三发+扩散，满蓄五发+扩散
+            base_count = 5 if charge >= CHARGE_THRESHOLD_TRIPLE else 3
+            total = base_count + spread_extra
+            return spread_bullets(total, base_x, base_y)
 
         if charge < CHARGE_THRESHOLD_DOUBLE:
-            return [mkbullet(base_x, base_y, style="single")]
+            return spread_bullets(1 + spread_extra, base_x, base_y)
 
         elif charge < CHARGE_THRESHOLD_TRIPLE:
-            offset: float = DOUBLE_SHOT_SPACING / 2.0
-            return [
-                mkbullet(base_x - offset, base_y, style="double"),
-                mkbullet(base_x + offset, base_y, style="double"),
-            ]
+            total = 2 + spread_extra
+            return spread_bullets(total, base_x, base_y)
 
         else:
-            return [
-                mkbullet(base_x, base_y, style="triple"),
-                mkbullet(base_x - 8, base_y + 2, style="double"),
-                mkbullet(base_x + 8, base_y + 2, style="double"),
-            ]
+            total = 3 + spread_extra
+            return spread_bullets(total, base_x, base_y)
 
     # ====================================================================
     # 蓄力进度条可视化（常驻显示，颜色分区指示等级）

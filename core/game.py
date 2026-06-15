@@ -49,6 +49,11 @@ from systems.ui_helpers import (
     PANEL_BG, PANEL_BORDER, PANEL_BORDER_LIGHT,
     ACCENT_GOLD, ACCENT_CYAN, TEXT_DIM, TEXT_NORMAL, TEXT_BRIGHT,
 )
+# ⭐ 玩家成长系统
+from systems.player_upgrades import (
+    PlayerUpgradeData, load_upgrades, save_upgrades,
+    apply_upgrades_to_player, render_upgrade_screen,
+)
 
 
 _proto_stats = TrafficStats()
@@ -242,6 +247,13 @@ class Game:
 
         # ---- 状态机 ----
         self.state: GameState = GameState.MENU
+
+        # ⭐ 玩家成长系统
+        self.upgrade_data: PlayerUpgradeData = load_upgrades()
+        self._upgrade_selected: int = 0          # 升级界面选中项
+        self._upgrade_show_levelup: bool = False # 显示升级提示
+        self._upgrade_levelup_count: int = 0     # 新获得等级数
+        self._xp_this_run: int = 0               # 本局获得经验
 
         # ---- 帧计数 / Delta-Time ----
         self.frame_count: int = 0
@@ -526,11 +538,32 @@ class Game:
                     self._entering_name = True
                     self._name_buffer = ""
                 else:
-                    self._start_game()
+                    self._go_to_upgrade()  # ⭐ 先去升级界面
                 return
             if key in (pygame.K_ESCAPE, pygame.K_q):
-                self._go_to_menu()
+                self._go_to_upgrade()  # ⭐ 先去升级界面
                 return
+
+        # ═══════════════════════════════════════════════════
+        # 状态：UPGRADE（⭐ 升级加点界面）
+        # ═══════════════════════════════════════════════════
+        elif self.state == GameState.UPGRADE:
+            if key == pygame.K_UP or key == pygame.K_w:
+                self._upgrade_selected = max(0, self._upgrade_selected - 1)
+            elif key == pygame.K_DOWN or key == pygame.K_s:
+                items = self.upgrade_data.get_levels_for_display()
+                self._upgrade_selected = min(len(items) - 1, self._upgrade_selected + 1)
+            elif key in (pygame.K_SPACE, pygame.K_RETURN):
+                items = self.upgrade_data.get_levels_for_display()
+                if 0 <= self._upgrade_selected < len(items):
+                    uid = items[self._upgrade_selected]["id"]
+                    if self.upgrade_data.apply_upgrade(uid):
+                        save_upgrades(self.upgrade_data)
+                        print(f"[UPGRADE] 已强化 {items[self._upgrade_selected]['name']}")
+                        if self.upgrade_data.points <= 0:
+                            self._go_to_menu()
+            elif key == pygame.K_ESCAPE or key == pygame.K_q:
+                self._go_to_menu()
 
     def _handle_keyup(self, event: pygame.event.Event) -> None:
         if self.state == GameState.PLAYING:
@@ -544,11 +577,11 @@ class Game:
             print(f"[GAME] 📝 排行榜已保存: {name} = {self.collision.score} (上榜={entry is not None})")
             self._entering_name = False
             self._name_buffer = ""
-            self._go_to_menu()
+            self._go_to_upgrade()  # ⭐ 先去升级界面
         elif event.key in (pygame.K_ESCAPE, pygame.K_q):
             self._entering_name = False
             self._name_buffer = ""
-            self._go_to_menu()
+            self._go_to_upgrade()
         elif event.key == pygame.K_r:
             # 取消姓名输入，直接重新开始
             self._entering_name = False
@@ -901,6 +934,12 @@ class Game:
             self._draw_game_over()
         elif self.state == GameState.VICTORY:
             self._draw_victory()
+        elif self.state == GameState.UPGRADE:
+            render_upgrade_screen(
+                self.screen, self.upgrade_data,
+                self._upgrade_selected,
+                self._upgrade_show_levelup, self._upgrade_levelup_count,
+            )
 
         # ── FPS 显示（右上角，所有状态可见，必须在 flip/update 之前绘制）──
         self._draw_fps()
@@ -2016,6 +2055,8 @@ class Game:
 
         self.player = Player()
         self.all_sprites.add(self.player)
+        # ⭐ 应用永久升级
+        apply_upgrades_to_player(self.player, self.upgrade_data)
 
         self.spawner.reset()
         self.spawner.set_player(self.player)
@@ -2056,6 +2097,43 @@ class Game:
         self._in_room_game = False
         self.state = GameState.MENU
         self.frame_count = 0
+
+    def _go_to_upgrade(self) -> None:
+        """结束游戏后进入升级界面（如有点数可加）。"""
+        # 保存本局经验
+        xp = self.collision.xp_earned
+        if xp > 0:
+            old_level = self.upgrade_data.level
+            gained = self.upgrade_data.add_xp(xp)
+            self._xp_this_run = xp
+            self._upgrade_show_levelup = gained > 0
+            self._upgrade_levelup_count = gained
+            save_upgrades(self.upgrade_data)
+            print(f"[UPGRADE] 获得 {xp} 经验, Lv.{old_level}→{self.upgrade_data.level}, "
+                  f"可用点数 {self.upgrade_data.points}")
+
+        # 清理游戏现场
+        self.all_sprites.empty()
+        self.bullets.empty()
+        self.enemies.empty()
+        self.explosions.empty()
+        self.powerups.empty()
+        self.player = Player()
+        self.all_sprites.add(self.player)
+        self.spawner.set_player(self.player)
+        self.ui.reset()
+        self._boss = None
+        self._screen_shake = 0.0
+        self.audio.stop_bgm()
+        self._in_room_game = False
+        self.frame_count = 0
+
+        # 有点数 → 升级界面；否则直接返回菜单
+        if self.upgrade_data.points > 0:
+            self._upgrade_selected = 0
+            self.state = GameState.UPGRADE
+        else:
+            self.state = GameState.MENU
 
     # ================================================================
     # 主循环

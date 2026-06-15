@@ -24,6 +24,7 @@ class GameState(Enum):
     PAUSED = auto()     # 暂停
     GAME_OVER = auto()  # 游戏结束
     VICTORY = auto()    # 通关胜利（题19）
+    UPGRADE = auto()    # ⭐ 升级加点界面
 
 class PowerUpType(Enum):
     """道具类型枚举"""
@@ -243,6 +244,23 @@ POWERUP_LIFETIME: float = 8.0              # 存活时间（秒）
 POWERUP_PULSE_SPEED: float = 4.0           # 脉冲动画频率（Hz）
 # 火力道具持续时间（秒）
 POWERUP_DURATION: float = 8.0
+
+# ---------------------- 玩家成长系统（⭐ 新增） ---------------------- #
+# 击杀经验值
+XP_NORMAL: int = 10            # 普通敌机
+XP_FAST: int = 15              # 快速敌机
+XP_ELITE: int = 30             # 精英敌机
+XP_TRACKING: int = 25          # 追踪敌机
+XP_BOSS: int = 100             # Boss
+
+# 升级所需经验公式: BASE + (level-1) × SCALE
+XP_LEVEL_BASE: int = 80        # 1级→2级所需经验
+XP_LEVEL_SCALE: int = 40       # 每级递增
+XP_LEVEL_MAX: int = 99         # 最高等级
+
+# 强化类型
+UPGRADE_MAX_LEVEL: int = 5                # 每项强化最高等级
+UPGRADE_POINTS_PER_LEVEL: int = 1         # 每升1级获得点数
 # 道具主题色（程序化渲染用）
 POWERUP_COLORS: dict = {
     PowerUpType.HEALTH: (0, 230, 60),

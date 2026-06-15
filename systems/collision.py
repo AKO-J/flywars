@@ -21,6 +21,7 @@ from settings import (
     POWERUP_DROP_CHANCE, POWERUP_ELITE_DROP_CHANCE,
     POWERUP_BOSS_DROP_COUNT,
     PowerUpType,
+    XP_NORMAL, XP_FAST, XP_ELITE, XP_TRACKING, XP_BOSS,
 )
 from sprites.bullet import BulletSource
 from sprites.player import Player
@@ -54,6 +55,8 @@ class CollisionSystem:
         # 道具掉落列表（题18）：[(x, y, PowerUpType), ...]
         self.drops: list[tuple[int, int, PowerUpType]] = []
         self.kills_this_frame: int = 0  # 本帧击杀数（供网络同步）
+        # ⭐ 本局累计经验（供成长系统）
+        self.xp_earned: int = 0
 
     # ================================================================
     # 公共入口
@@ -92,6 +95,7 @@ class CollisionSystem:
         self.boss_defeated = False
         self.boss_death_positions.clear()
         self.drops.clear()
+        self.xp_earned = 0
 
     # ================================================================
     # 玩家子弹 vs 敌机
@@ -177,6 +181,17 @@ class CollisionSystem:
     def _on_enemy_killed(self, enemy: Enemy) -> None:
         self.score += enemy.score_value
         self.kills_this_frame += 1
+        # ⭐ 累计经验
+        if isinstance(enemy, BossEnemy):
+            self.xp_earned += XP_BOSS
+        elif isinstance(enemy, EliteEnemy):
+            self.xp_earned += XP_ELITE
+        elif isinstance(enemy, TrackingEnemy):
+            self.xp_earned += XP_TRACKING
+        elif isinstance(enemy, FastEnemy):
+            self.xp_earned += XP_FAST
+        elif isinstance(enemy, NormalEnemy):
+            self.xp_earned += XP_NORMAL
         esize = _explosion_size(enemy)
         self.explosion_positions.append((enemy.rect.centerx, enemy.rect.centery, esize))
         self.floating_texts.append(
