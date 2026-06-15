@@ -49,6 +49,12 @@ from systems.ui_helpers import (
     PANEL_BG, PANEL_BORDER, PANEL_BORDER_LIGHT,
     ACCENT_GOLD, ACCENT_CYAN, TEXT_DIM, TEXT_NORMAL, TEXT_BRIGHT,
 )
+# ⭐ 粒子特效系统
+from sprites.particles import ParticleEmitter
+# ⭐ 回放系统
+from systems.replay import ReplayRecorder, ReplayPlayer
+# ⭐ 性能分析工具
+from systems.profiler import FrameProfiler
 # ⭐ 玩家成长系统
 from systems.player_upgrades import (
     PlayerUpgradeData, load_upgrades, save_upgrades,
@@ -228,6 +234,22 @@ class Game:
         )
         self._network_auto_connect = bool(cfg.get("network.auto_connect", False))
 
+        # ---- ⭐ 粒子特效系统 ----
+        self.particles: ParticleEmitter = ParticleEmitter()
+
+        # ---- ⭐ 游戏手柄支持 ----
+        self._joystick: pygame.joystick.Joystick | None = None
+        self._joystick_deadzone: float = 0.25
+        self._init_joystick()
+
+        # ---- ⭐ 回放系统 ----
+        self._replay_recorder: ReplayRecorder = ReplayRecorder()
+        self._replay_player: ReplayPlayer | None = None
+        self._replay_status_text: str = ""
+
+        # ---- ⭐ 性能分析工具 ----
+        self._profiler: FrameProfiler = FrameProfiler()
+
         # ---- 脏矩形背景回调（LayeredDirty.clear 使用）----
         self._bg_callback: BackgroundCallback = BackgroundCallback(self.background)
 
@@ -307,6 +329,9 @@ class Game:
                         self._chat_input_buffer += event.text
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 self._handle_menu_click(event.pos)
+            # ⭐ 手柄按钮事件
+            elif event.type == pygame.JOYBUTTONDOWN:
+                self._handle_joystick_button(event)
 
     def _handle_keydown(self, event: pygame.event.Event) -> None:
         key = event.key
@@ -391,6 +416,47 @@ class Game:
             return
         if key == pygame.K_F10:
             self._toggle_network()
+            return
+        # ⭐ F11 性能分析工具
+        if key == pygame.K_F11:
+            self._profiler.toggle()
+            print(f"[PROFILER] {'显示' if self._profiler.visible else '隐藏'}")
+            return
+        # ⭐ 回放热键: F3=录制, F4=回放
+        if key == pygame.K_F3:
+            if not self._replay_recorder.is_recording and self._replay_player is None:
+                # 如果在游戏中，立即开始录制
+                if self.state == GameState.PLAYING:
+                    self._replay_recorder.start()
+                    self._replay_status_text = "⏺ 录制中..."
+                    gl = GameLogger.get_instance()
+                    gl.info("回放录制开始", frame=self.frame_count)
+                    print(f"[REPLAY] 📹 开始录制 (frame={self.frame_count})")
+            else:
+                # 停止录制
+                if self._replay_recorder.is_recording:
+                    data = self._replay_recorder.stop()
+                    gl = GameLogger.get_instance()
+                    gl.info("回放录制结束", frames=len(data.frames),
+                            duration=f"{data.duration_seconds:.1f}s")
+                    self._replay_status_text = f"✅ 录制完成 ({len(data.frames)}帧)"
+                    print(f"[REPLAY] 📹 录制结束: {len(data.frames)}帧 "
+                          f"{data.duration_seconds:.1f}s")
+            return
+        if key == pygame.K_F4:
+            if self._replay_player is not None and self._replay_player.is_playing:
+                self._replay_player.stop()
+                self._replay_player = None
+                self._replay_status_text = ""
+                print(f"[REPLAY] ⏹ 回放停止")
+            elif self._replay_recorder._data.frames:
+                # 从录制数据创建回放
+                self._replay_player = ReplayPlayer(self._replay_recorder._data)
+                self._replay_player.start()
+                self._replay_status_text = "▶ 回放中..."
+                gl = GameLogger.get_instance()
+                gl.info("回放开始", frames=len(self._replay_player._data.frames))
+                print(f"[REPLAY] ▶ 开始回放 ({len(self._replay_player._data.frames)}帧)")
             return
 
         # ═══════════════════════════════════════════════════
@@ -554,6 +620,146 @@ class Game:
             elif key == pygame.K_ESCAPE or key == pygame.K_q:
                 self.state = GameState.MENU  # 直接回菜单，无需再次清理
 
+    # ════════════════════════════════════════════════════════════════
+    # ⭐ 游戏手柄支持
+    # ════════════════════════════════════════════════════════════════
+
+    def _init_joystick(self) -> None:
+        """初始化第一个可用手柄。"""
+        try:
+            pygame.joystick.init()
+            if pygame.joystick.get_count() > 0:
+                joy = pygame.joystick.Joystick(0)
+                joy.init()
+                self._joystick = joy
+                gl = GameLogger.get_instance()
+                gl.info("手柄已连接", name=joy.get_name(),
+                        axes=joy.get_numaxes(), buttons=joy.get_numbuttons())
+                print(f"[JOY] 手柄已连接: {joy.get_name()}"
+                      f" (axis={joy.get_numaxes()} btn={joy.get_numbuttons()})")
+        except Exception as e:
+            self._joystick = None
+            print(f"[JOY] 手柄初始化失败: {e}")
+
+    def _handle_joystick(self) -> None:
+        """每帧读取手柄状态 → 转换为键盘等效操作。"""
+        if self._joystick is None or self.state != GameState.PLAYING:
+            return
+
+        try:
+            # 左摇杆 → 方向移动
+            axis_x = self._joystick.get_axis(0)
+            axis_y = self._joystick.get_axis(1)
+
+            # 死区过滤
+            if abs(axis_x) < self._joystick_deadzone:
+                axis_x = 0
+            if abs(axis_y) < self._joystick_deadzone:
+                axis_y = 0
+
+            # 模拟按键事件给 player
+            keys = pygame.key.get_pressed()
+            if axis_x < 0:
+                self.player.move_left = True
+            elif axis_x > 0:
+                self.player.move_right = True
+            if axis_y < 0:
+                self.player.move_up = True
+            elif axis_y > 0:
+                self.player.move_down = True
+
+            # ⭐ LT/RT/L2/R2 扳机 → 射击 / 加速（轴 2/5 或 4/5 视手柄而定）
+            if self._joystick.get_numaxes() >= 5:
+                trigger_l = self._joystick.get_axis(2)  # LT
+                trigger_r = self._joystick.get_axis(5)  # RT
+                if trigger_r > 0.3:
+                    self.player._is_firing = True
+                if trigger_l > 0.3:
+                    # 加速（等同于 Shift）
+                    keys_boost = True
+                    self.player.move_speed_mult = self.player.BOOST_MULTIPLIER
+                else:
+                    self.player.move_speed_mult = 1.0
+
+            # ⭐ 右摇杆 → 快速移动（瞄准方向）
+            if self._joystick.get_numaxes() >= 4:
+                rx = self._joystick.get_axis(3)  # 右摇杆 X
+                ry = self._joystick.get_axis(4)  # 右摇杆 Y
+                if abs(rx) < self._joystick_deadzone:
+                    rx = 0
+                if abs(ry) < self._joystick_deadzone:
+                    ry = 0
+                # 右摇杆提供额外移动向量（与左摇杆叠加）
+                if abs(rx) > 0.2 or abs(ry) > 0.2:
+                    self.player._joy_rx = rx
+                    self.player._joy_ry = ry
+                else:
+                    self.player._joy_rx = 0.0
+                    self.player._joy_ry = 0.0
+
+        except Exception:
+            pass  # 手柄拔出等异常静默处理
+
+    def _handle_joystick_button(self, event: pygame.event.Event) -> None:
+        """手柄按钮事件 → 映射为键盘按键。"""
+        if self._joystick is None:
+            return
+        if event.type == pygame.JOYBUTTONDOWN:
+            btn = event.button
+            # A → 空格（射击/确认）
+            if btn == 0:
+                new_ev = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_SPACE)
+                self._handle_keydown(new_ev)
+            # B → ESC（暂停/取消）
+            elif btn == 1:
+                new_ev = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE)
+                self._handle_keydown(new_ev)
+            # X → R（重新开始）
+            elif btn == 2:
+                if self.state in (GameState.GAME_OVER, GameState.VICTORY):
+                    new_ev = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_r)
+                    self._handle_keydown(new_ev)
+            # Y → 聊天快捷消息
+            elif btn == 3:
+                if self.state == GameState.PLAYING and self.network.is_connected:
+                    self._chat_channel = 1 - self._chat_channel
+            # LB (左肩) → Tab（聊天频道切换）
+            elif btn == 4:
+                if self.state == GameState.PLAYING:
+                    self._chat_input_active = not self._chat_input_active
+                    self._chat_input_buffer = ""
+            # RB (右肩) → Enter（发送聊天）
+            elif btn == 5:
+                if self._chat_input_active and self._chat_input_buffer.strip():
+                    text = self._chat_input_buffer.strip()
+                    self.network.send_chat(text, channel=self._chat_channel)
+                    self._add_chat_history("我", text, self._chat_channel)
+                    self._chat_input_active = False
+                    self._chat_input_buffer = ""
+            # Start → P（暂停）
+            elif btn == 7:
+                if self.state == GameState.PLAYING:
+                    self.state = GameState.PAUSED
+                elif self.state == GameState.PAUSED:
+                    self.state = GameState.PLAYING
+            # D-Pad Up → 菜单上
+            elif btn == 11:
+                if self.state == GameState.UPGRADE:
+                    self._upgrade_selected = max(0, self._upgrade_selected - 1)
+            # D-Pad Down → 菜单下
+            elif btn == 12:
+                if self.state == GameState.UPGRADE:
+                    items = self.upgrade_data.get_levels_for_display()
+                    self._upgrade_selected = min(len(items) - 1, self._upgrade_selected + 1)
+            # D-Pad Left → 快捷消息 1
+            elif btn == 13:
+                if self.state == GameState.PLAYING and self.network.is_connected:
+                    self._handle_keydown(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_1))
+            # D-Pad Right → 快捷消息 2
+            elif btn == 14:
+                if self.state == GameState.PLAYING and self.network.is_connected:
+                    self._handle_keydown(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_2))
+
     def _handle_keyup(self, event: pygame.event.Event) -> None:
         if self.state == GameState.PLAYING:
             self.player.handle_keyup(event)
@@ -679,6 +885,9 @@ class Game:
         # 背景始终滚动（菜单/暂停也有动态感）
         self.background.update(self.dt)
 
+        # ⭐ 粒子特效更新
+        self.particles.update(self.dt)
+
         # 菜单闪烁计时器
         self._menu_blink += self.dt
         if self._menu_blink > 2.0:
@@ -739,6 +948,13 @@ class Game:
             self._event_bus.publish(Event(GameEvent.LEVEL_UP, {
                 "level": new_level, "score": self.collision.score,
             }))
+            # ⭐ 升级粒子光环（在屏幕中心爆发）
+            self.particles.level_up_ring(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
+            # ⭐ 关卡背景主题切换
+            if self.background.set_theme_by_level(new_level):
+                gl = GameLogger.get_instance()
+                gl.info("背景主题切换", level=new_level,
+                        theme=self.background.current_theme.name)
 
         # ---- 生成敌机 / Boss ----
         new_boss = self.spawner.update(self.dt, self.enemies, self.all_sprites)
@@ -751,6 +967,16 @@ class Game:
         for b in auto_bullets:
             self.bullets.add(b)
             self.all_sprites.add(b)
+
+        # ⭐ 引擎尾焰粒子（玩家底部中心）
+        self.particles.set_engine(
+            True,
+            float(self.player.rect.centerx),
+            float(self.player.rect.bottom),
+        )
+
+        # ⭐ 手柄输入处理（每帧更新）
+        self._handle_joystick()
 
         # ---- Boss 弹幕 ----
         if self._boss is not None and self._boss.alive():
@@ -786,7 +1012,8 @@ class Game:
         # ---- 碰撞检测 ----
         _hp_before = self.player.hp
         alive: bool = self.collision.handle_all(
-            self.bullets, self.enemies, self.player
+            self.bullets, self.enemies, self.player,
+            dt=self.dt if self.dt > 0 else 1.0 / 60.0,
         )
         # ── 网络同步：击杀敌人时通知服务器加分 ──
         if self.network.is_connected and self._my_room and self.collision.kills_this_frame > 0:
@@ -825,15 +1052,18 @@ class Game:
                 self._screen_shake = max(self._screen_shake, 1.5)
             self.explosions.add(exp)
             self.all_sprites.add(exp)
+            # ⭐ 粒子爆发
+            self.particles.burst_explosion(pos[0], pos[1], esize)
+            # Boss 死亡额外粒子爆发
+            if esize == "huge":
+                self.particles.boss_death(pos[0], pos[1])
             self._event_bus.publish_async(Event(GameEvent.ENEMY_KILLED, {
                 "is_boss": False, "size": esize,
                 "x": pos[0], "y": pos[1],
             }))
-        # ⭐ 命中火花：子弹击中敌机时的小冲击波（含屏幕震动）
+        # ⭐ 命中火花：粒子爆发 + 屏幕震动
         for sx, sy, intensity in self.collision.hit_sparks:
-            spark = Explosion(sx, sy, "spark")
-            self.explosions.add(spark)
-            self.all_sprites.add(spark)
+            self.particles.hit_spark(sx, sy, intensity)
             self._screen_shake = max(self._screen_shake, 1.0)
         # 飘字得分
         for x, y, sv in self.collision.floating_texts:
@@ -841,6 +1071,17 @@ class Game:
             self._event_bus.publish_async(Event(GameEvent.SCORE_CHANGED, {
                 "amount": sv, "total": self.collision.score,
             }))
+        # ⭐ Combo 加分飘字（金色）
+        for cx, cy, bonus in self.collision.combo_bonus_texts:
+            self.ui.add_pickup_text(cx, cy, f"+{bonus}", (255, 215, 80))
+
+        # ⭐ Combo 断开提示
+        if self.collision.combo_just_broke and self.collision.combo_peak >= 3:
+            sw = SCREEN_WIDTH
+            self.particles.burst(sw // 2, SCREEN_HEIGHT // 2 - 30,
+                                 count=8, speed=100, gravity=0, lifetime=0.6,
+                                 colors=[(255, 80, 80), (255, 150, 50)],
+                                 size_range=(3, 6), spread=2 * math.pi)
 
         # ---- 道具掉落生成（题18） ----
         for dx, dy, ptype in self.collision.drops:
@@ -866,6 +1107,25 @@ class Game:
 
         # ---- UI 更新 ----
         self.ui.update(self.dt, self.collision.score)
+
+        # ⭐ 回放录制：记录当前帧玩家输入
+        if self._replay_recorder.is_recording:
+            self._replay_recorder.record_frame(self.frame_count, self.player)
+
+        # ⭐ 回放播放：应用录制的输入到玩家
+        if self._replay_player is not None and self._replay_player.is_playing:
+            inp = self._replay_player.play_frame(self.frame_count)
+            if inp is not None:
+                inp.apply_to(self.player)
+                self._replay_status_text = (
+                    f"▶ 回放 {self._replay_player.progress * 100:.0f}%"
+                )
+            else:
+                self._replay_player = None
+                self._replay_status_text = "⏹ 回放结束"
+                gl = GameLogger.get_instance()
+                gl.info("回放播放完成")
+                print(f"[REPLAY] ⏹ 回放播放完成")
 
     # ================================================================
     # 道具拾取处理（题18）
@@ -896,6 +1156,9 @@ class Game:
             glow = Explosion(pu.rect.centerx, pu.rect.centery, "normal")
             self.explosions.add(glow)
             self.all_sprites.add(glow)
+            # ⭐ 粒子光晕
+            pu_color = POWERUP_COLORS.get(pu.powerup_type, (100, 255, 100))
+            self.particles.pickup_glow(pu.rect.centerx, pu.rect.centery, pu_color)
 
             if result == "bomb":
                 self._trigger_bomb()
@@ -936,6 +1199,8 @@ class Game:
     def render(self) -> None:
         self.screen.fill(BLACK)
         self.background.draw(self.screen)
+        # ⭐ 粒子特效渲染（在最底层，背景之上、精灵之下）
+        self.particles.draw(self.screen)
 
         # ── 游戏画面（PLAYING / PAUSED / GAME_OVER / VICTORY 都显示）──
         if self.state not in (GameState.MENU,):
@@ -974,6 +1239,8 @@ class Game:
 
         self._draw_log_panel()
         self._draw_chat_ui()  # 聊天系统 UI（题13）
+        # ⭐ 性能分析叠加显示
+        self._profiler.draw(self.screen)
         pygame.display.flip()
 
     def _render_full(self) -> None:
@@ -1126,6 +1393,9 @@ class Game:
             len(self.enemies), self.spawner.type_counts,
             network_status=self.network.status_text() if self.network.running else "",
             network_color=self.network.status_color() if self.network.running else RED,
+            combo_text=self.collision.combo_display_text,
+            combo_count=self.collision.combo_count,
+            combo_multiplier=self.collision.combo_multiplier,
         )
 
         # ── 团队积分 / 计时器 ──
@@ -1145,7 +1415,7 @@ class Game:
         #    最终 flip 由 render() 统一调用，确保 FPS 文字等也一并刷新
 
     def _draw_fps(self) -> None:
-        """在屏幕左上角绘制 FPS 和脏矩形状态。"""
+        """在屏幕左上角绘制 FPS、脏矩形状态和 ⭐ 回放状态。"""
         font = pygame.font.Font(UI_FONT_PATH, 16)
         fps_text = f"FPS: {self._fps_display:.0f}"
         color = GREEN if self._fps_display >= 55 else (YELLOW if self._fps_display >= 30 else RED)
@@ -1155,6 +1425,11 @@ class Game:
         mode = "DirtyRect" if self._use_dirty_rects else "Full"
         mode_surf = font.render(mode, True, (150, 150, 150))
         self.screen.blit(mode_surf, (SCREEN_WIDTH - 90, 20))
+
+        # ⭐ 回放状态
+        if self._replay_status_text:
+            replay_surf = font.render(self._replay_status_text, True, (100, 255, 100))
+            self.screen.blit(replay_surf, (SCREEN_WIDTH - 200, 36))
 
     # ================================================================
     # 主菜单界面
@@ -2083,6 +2358,9 @@ class Game:
         self.collision.reset()
         self.ui.reset()
         self.audio.reset()  # ⭐ 重置音频状态
+        # ⭐ 背景主题重置为星空
+        self.background = ScrollingBackground()
+        self._bg_callback = BackgroundCallback(self.background)
         self._boss = None
         self._boss_dying = False
         self._boss_dying_positions.clear()
@@ -2176,11 +2454,26 @@ class Game:
         if self._network_auto_connect:
             self.network.start()
         while self.running:
+            # ⭐ 性能分析：开始帧
+            self._profiler.begin_frame()
+
+            self._profiler.begin_section("events")
             self.handle_events()
+            self._profiler.end_section()
+
+            self._profiler.begin_section("update")
             self.update()
+            self._profiler.end_section()
+
+            self._profiler.begin_section("render")
             self.render()
+            self._profiler.end_section()
+
             delta_ms: float = self.clock.tick(FPS)
             self.dt = delta_ms / 1000.0
+
+            # ⭐ 性能分析：结束帧
+            self._profiler.end_frame()
         self.network.stop()
 
     def quit(self) -> None:

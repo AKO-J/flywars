@@ -26,6 +26,8 @@ from settings import (
 from sprites.bullet import BulletSource
 from sprites.player import Player
 from sprites.enemy import Enemy, BossEnemy, EliteEnemy, TrackingEnemy, FastEnemy, NormalEnemy
+# ⭐ 空间哈希加速
+from systems.spatial_hash import SpatialHash
 
 
 def _explosion_size(enemy: Enemy) -> str:
@@ -59,6 +61,19 @@ class CollisionSystem:
         self.xp_earned: int = 0
         # ⭐ 命中火花位置 [(x, y, intensity), ...]
         self.hit_sparks: list[tuple[int, int, str]] = []
+        # ⭐ Combo 加分飘字 [(x, y, bonus), ...]
+        self.combo_bonus_texts: list[tuple[int, int, int]] = []
+        # ⭐ 空间哈希（精灵数多时启用）
+        self._spatial: SpatialHash = SpatialHash(cell_size=64)
+        self._spatial_enabled: bool = True
+
+        # ⭐ Combo 连击系统
+        self.combo_count: int = 0           # 当前连击数
+        self.combo_timer: float = 0.0       # 连击计时（超时重置）
+        self.combo_timeout: float = 2.0     # 连击超时（秒）
+        self.combo_multiplier: int = 1      # 当前倍率
+        self.combo_peak: int = 0            # 本局最高连击
+        self.combo_just_broke: bool = False  # 本帧刚断连
 
     # ================================================================
     # 公共入口
@@ -69,6 +84,7 @@ class CollisionSystem:
         bullets_group: pygame.sprite.Group,
         enemies_group: pygame.sprite.Group,
         player: Player,
+        dt: float = 1.0 / 60.0,  # ⭐ 新增：用于 combo 计时
     ) -> bool:
         """
         执行所有碰撞检测。
@@ -83,6 +99,10 @@ class CollisionSystem:
         self.drops.clear()
         self.kills_this_frame = 0
         self.hit_sparks.clear()
+        self.combo_bonus_texts.clear()
+
+        # ⭐ 更新 combo 计时器
+        self._update_combo(dt)
 
         self._handle_bullet_enemy(bullets_group, enemies_group)
         self._handle_player_enemy(player, enemies_group)
@@ -90,6 +110,39 @@ class CollisionSystem:
 
         game_over = player.is_dead
         return not game_over
+
+    # ════════════════════════════════════════════════════════════════
+    # ⭐ Combo 连击系统
+    # ════════════════════════════════════════════════════════════════
+
+    def _update_combo(self, dt: float) -> None:
+        """更新连击计时器，超时重置。"""
+        self.combo_just_broke = False
+        if self.combo_count > 0:
+            self.combo_timer -= dt
+            if self.combo_timer <= 0:
+                self.combo_just_broke = True
+                self.combo_count = 0
+                self.combo_multiplier = 1
+
+    def _get_combo_bonus_score(self, base_score: int) -> int:
+        """根据当前连击倍率计算额外奖励分数。"""
+        return base_score * (self.combo_multiplier - 1)
+
+    @property
+    def combo_display_text(self) -> str:
+        """连击显示文字（含倍率）。"""
+        if self.combo_count < 2:
+            return ""
+        return f"COMBO x{self.combo_multiplier}"
+
+    def reset_combo(self) -> None:
+        """重置连击状态。"""
+        self.combo_count = 0
+        self.combo_timer = 0.0
+        self.combo_multiplier = 1
+        self.combo_peak = 0
+        self.combo_just_broke = False
 
     def reset(self) -> None:
         self.score = 0
@@ -100,6 +153,8 @@ class CollisionSystem:
         self.drops.clear()
         self.xp_earned = 0
         self.hit_sparks.clear()
+        self.combo_bonus_texts.clear()
+        self.reset_combo()
 
     # ================================================================
     # 玩家子弹 vs 敌机
@@ -110,11 +165,20 @@ class CollisionSystem:
         bullets_group: pygame.sprite.Group,
         enemies_group: pygame.sprite.Group,
     ) -> None:
-        # dokilla=False：穿透弹不应被销毁，由我们手动处理
-        hits: dict = pygame.sprite.groupcollide(
-            bullets_group, enemies_group,
-            dokilla=False, dokillb=False,
-        )
+        # ⭐ 精灵数较多时使用空间哈希加速
+        n_bullets = len(bullets_group)
+        n_enemies = len(enemies_group)
+        use_spatial = self._spatial_enabled and (n_bullets * n_enemies > 200)
+
+        if use_spatial:
+            hits = self._spatial.get_pairs_for_group(bullets_group, enemies_group)
+        else:
+            # dokilla=False：穿透弹不应被销毁，由我们手动处理
+            hits: dict = pygame.sprite.groupcollide(
+                bullets_group, enemies_group,
+                dokilla=False, dokillb=False,
+            )
+
         for bullet, enemy_list in hits.items():
             if bullet.source != BulletSource.PLAYER:
                 continue
@@ -145,10 +209,13 @@ class CollisionSystem:
         player: Player,
         enemies_group: pygame.sprite.Group,
     ) -> None:
-        hits: list = pygame.sprite.spritecollide(
-            player, enemies_group, dokill=False
-        )
-        for enemy in hits:
+        if self._spatial_enabled and len(enemies_group) > 20:
+            candidates = self._spatial.get_candidates(player, enemies_group)
+        else:
+            candidates = pygame.sprite.spritecollide(
+                player, enemies_group, dokill=False
+            )
+        for enemy in candidates:
             if not enemy.alive():
                 continue
 
@@ -186,8 +253,28 @@ class CollisionSystem:
     # ================================================================
 
     def _on_enemy_killed(self, enemy: Enemy) -> None:
-        self.score += enemy.score_value
+        # ⭐ 更新连击
+        self.combo_count += 1
+        self.combo_timer = self.combo_timeout
+        # 倍率表：3连=2x, 5连=3x, 10连=4x, 20连=5x
+        if self.combo_count >= 20:
+            self.combo_multiplier = 5
+        elif self.combo_count >= 10:
+            self.combo_multiplier = 4
+        elif self.combo_count >= 5:
+            self.combo_multiplier = 3
+        elif self.combo_count >= 3:
+            self.combo_multiplier = 2
+        else:
+            self.combo_multiplier = 1
+        self.combo_peak = max(self.combo_peak, self.combo_count)
+
+        bonus = self._get_combo_bonus_score(enemy.score_value)
+        self.score += enemy.score_value + bonus
         self.kills_this_frame += 1
+        # ⭐ combo 加分飘字
+        if bonus > 0:
+            self.combo_bonus_texts.append((enemy.rect.centerx, enemy.rect.centery - 20, bonus))
         # ⭐ 累计经验
         if isinstance(enemy, BossEnemy):
             self.xp_earned += XP_BOSS

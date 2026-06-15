@@ -156,10 +156,15 @@ class UISystem:
         spawner_counts: dict[str, int],
         network_status: str = "",
         network_color: tuple[int, int, int] = RED,
+        combo_text: str = "",           # ⭐ 连击文字
+        combo_count: int = 0,           # ⭐ 连击数
+        combo_multiplier: int = 1,      # ⭐ 连击倍率
     ) -> None:
-        """绘制全部 UI 层（HUD → 道具指示器 → 飘字 → 关卡提示 → 炸弹闪屏 → 网络状态）。"""
+        """绘制全部 UI 层（HUD → 道具指示器 → ⭐ 连击 → 飘字 → 关卡提示 → 炸弹闪屏 → 网络状态）。"""
         self._draw_hud(screen, player, score, enemy_count, spawner_counts)
         self._draw_powerup_indicator(screen, player)
+        # ⭐ 连击显示
+        self._draw_combo(screen, combo_text, combo_count, combo_multiplier)
         self._draw_floating_texts(screen)
         self._draw_level_up(screen)
         self._draw_network_status(screen, network_status, network_color)
@@ -377,6 +382,38 @@ class UISystem:
     # ================================================================
     # 飘字得分
     # ================================================================
+
+    # ════════════════════════════════════════════════════════════════
+    # ⭐ 连击显示
+    # ════════════════════════════════════════════════════════════════
+
+    def _draw_combo(self, screen: pygame.Surface, combo_text: str,
+                    combo_count: int, combo_multiplier: int) -> None:
+        """在屏幕右侧绘制连击计数器。"""
+        if combo_count < 2:
+            return
+        sw = SCREEN_WIDTH
+        font_large = get_font(28)
+        font_small = get_font(14)
+
+        # 连击数字（大号，右侧纵向）
+        count_str = str(combo_count)
+        count_surf = font_large.render(count_str, True, (255, 200, 50))
+        count_x = sw - count_surf.get_width() - 15
+        count_y = 55
+
+        # 发光效果
+        glow_surf = font_large.render(count_str, True, (255, 150, 0))
+        glow_surf.set_alpha(60)
+        screen.blit(glow_surf, (count_x + 2, count_y + 2))
+
+        screen.blit(count_surf, (count_x, count_y))
+
+        # 倍率标签
+        mult_text = f"COMBO x{combo_multiplier}"
+        mult_surf = font_small.render(mult_text, True, (255, 200, 100))
+        mult_x = sw - mult_surf.get_width() - 15
+        screen.blit(mult_surf, (mult_x, count_y + count_surf.get_height() - 4))
 
     def _draw_floating_texts(self, screen: pygame.Surface) -> None:
         """绘制所有飘字得分（叠加在游戏画面上层）。"""

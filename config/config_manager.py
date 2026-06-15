@@ -28,11 +28,12 @@ _SCHEMA: dict[str, dict[str, type | tuple]] = {
     "bullet": {"player_speed": (int, float), "player_damage": int,
                "enemy_speed": (int, float), "enemy_damage": int,
                "charge_threshold_double": float, "charge_threshold_triple": float},
-    "enemy": {},
+    "enemy": {"normal": {}, "fast": {}, "elite": {}, "tracking": {}},
     "boss": {"hp": int, "speed": (int, float), "score": int, "spawn_level": int,
-             "final_level": int},
+             "final_level": int, "collision_damage": int},
     "difficulty": {"spawn_interval_scale": float, "speed_scale": float,
-                   "hp_scale": float, "spawn_interval_min": float},
+                   "hp_scale": float, "spawn_interval_min": float,
+                   "fire_rate_scale": float},
     "background": {"base_speed": (int, float)},
     "audio": {"sfx_volume": float, "bgm_volume": float},
     "powerup": {"drop_chance": float, "elite_drop_chance": float,
@@ -146,6 +147,9 @@ class ConfigManager:
                     errors.append(f"{section}.{key} 缺失")
                     continue
                 value = section_data[key]
+                # {} 表示"任意结构通过校验"，跳过类型检查
+                if isinstance(expected_type, dict):
+                    continue
                 if not isinstance(value, expected_type):
                     errors.append(
                         f"{section}.{key} 类型错误: 期望 {expected_type}, "
@@ -287,6 +291,7 @@ class ConfigManager:
             _s.ENEMY_NORMAL_WIDTH = d["enemy"]["normal"]["width"]
             _s.ENEMY_NORMAL_HEIGHT = d["enemy"]["normal"]["height"]
             _s.ENEMY_NORMAL_SPAWN_INTERVAL = d["enemy"]["normal"]["spawn_interval"]
+            _s.ENEMY_NORMAL_FIRE_INTERVAL = d["enemy"]["normal"].get("fire_interval", 2.8)
 
             # 敌机 — Fast
             _s.ENEMY_FAST_SPEED = d["enemy"]["fast"]["speed"]
@@ -296,6 +301,7 @@ class ConfigManager:
             _s.ENEMY_FAST_HEIGHT = d["enemy"]["fast"]["height"]
             _s.ENEMY_FAST_SPAWN_INTERVAL = d["enemy"]["fast"]["spawn_interval"]
             _s.ENEMY_FAST_DIAGONAL_SPEED = d["enemy"]["fast"]["diagonal_speed"]
+            _s.ENEMY_FAST_FIRE_INTERVAL = d["enemy"]["fast"].get("fire_interval", 2.2)
 
             # 敌机 — Elite
             _s.ENEMY_ELITE_SPEED = d["enemy"]["elite"]["speed"]
@@ -306,6 +312,9 @@ class ConfigManager:
             _s.ENEMY_ELITE_SPAWN_INTERVAL = d["enemy"]["elite"]["spawn_interval"]
             _s.ENEMY_ELITE_WAVE_AMPLITUDE = d["enemy"]["elite"]["wave_amplitude"]
             _s.ENEMY_ELITE_WAVE_FREQUENCY = d["enemy"]["elite"]["wave_frequency"]
+            _s.ENEMY_ELITE_FIRE_INTERVAL = d["enemy"]["elite"].get("fire_interval", 1.5)
+            _s.ENEMY_ELITE_BURST_COUNT = d["enemy"]["elite"].get("burst_count", 3)
+            _s.ENEMY_ELITE_BURST_INTERVAL = d["enemy"]["elite"].get("burst_interval", 0.12)
 
             # 敌机 — Tracking
             _s.ENEMY_TRACKING_SPEED = d["enemy"]["tracking"]["speed"]
@@ -314,6 +323,7 @@ class ConfigManager:
             _s.ENEMY_TRACKING_WIDTH = d["enemy"]["tracking"]["width"]
             _s.ENEMY_TRACKING_HEIGHT = d["enemy"]["tracking"]["height"]
             _s.ENEMY_TRACKING_SPAWN_INTERVAL = d["enemy"]["tracking"]["spawn_interval"]
+            _s.ENEMY_TRACKING_FIRE_INTERVAL = d["enemy"]["tracking"].get("fire_interval", 1.8)
 
             # Boss
             _s.BOSS_SPAWN_LEVEL = d["boss"]["spawn_level"]
@@ -342,6 +352,7 @@ class ConfigManager:
             _s.DIFFICULTY_SPEED_SCALE = d["difficulty"]["speed_scale"]
             _s.DIFFICULTY_HP_SCALE = d["difficulty"]["hp_scale"]
             _s.SPAWN_INTERVAL_MIN = d["difficulty"]["spawn_interval_min"]
+            _s.DIFFICULTY_FIRE_RATE_SCALE = d["difficulty"].get("fire_rate_scale", 0.88)
 
             # 背景
             _s.BACKGROUND_BASE_SPEED = d["background"]["base_speed"]

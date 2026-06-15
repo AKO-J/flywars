@@ -488,7 +488,7 @@ class TrackingEnemy(Enemy):
 
 class BossEnemy(Enemy):
     """
-    Boss 敌机。
+    Boss 敌机 — 多阶段战斗系统。
 
     行为：
       1. 进入阶段：从屏幕顶外缓慢下降至目标Y位置（约 1/5 屏高处）
@@ -497,16 +497,26 @@ class BossEnemy(Enemy):
          — 圆形弹幕：以 Boss 为中心向 12 方向发射
          — 瞄准弹幕：向玩家当前位置发射 3 发
          — 螺旋弹幕：连续高速发射，角度持续旋转
-      4. 死亡：产生爆炸 + 大量得分
+      4. 战斗阶段（根据 HP 百分比自动切换）：
+         — PHASE_1 (HP>70%): 标准速度，标准弹幕
+         — PHASE_2 (70%≥HP>30%): 加速，新增交叉弹幕，屏幕震动
+         — PHASE_3 (HP≤30%): 狂暴模式，所有弹幕大幅加速，高频射击
+      5. 死亡：产生爆炸 + 大量得分 + 粒子特效
 
-    draw_hp_bar() 在屏幕顶部居中绘制独立 Boss 血条。
+    draw_hp_bar() 在屏幕顶部居中绘制独立 Boss 血条，颜色随阶段变化。
     """
 
     # 弹幕模式
-    MODE_FAN: str = "fan"        # 扇形弹幕（题19）
-    MODE_CIRCLE: str = "circle"
-    MODE_AIMED: str = "aimed"
-    MODE_SPIRAL: str = "spiral"
+    MODE_FAN: str = "fan"        # 扇形弹幕
+    MODE_CIRCLE: str = "circle"  # 圆形弹幕
+    MODE_AIMED: str = "aimed"    # 瞄准弹幕
+    MODE_SPIRAL: str = "spiral"  # 螺旋弹幕
+    MODE_CROSS: str = "cross"    # ⭐ 交叉弹幕（Phase 2+）
+
+    # ⭐ 战斗阶段
+    PHASE_1: str = "phase1"  # HP > 70%
+    PHASE_2: str = "phase2"  # 70% ≥ HP > 30%
+    PHASE_3: str = "phase3"  # HP ≤ 30%
 
     def __init__(
         self,
@@ -533,10 +543,18 @@ class BossEnemy(Enemy):
         self._target_y: float = 80.0  # 巡逻目标Y坐标
         self._patrol_dir: float = 1.0  # 巡逻方向（1=右, -1=左）
 
-        # 弹幕计时器（题19：扇形弹幕作为起手模式）
+        # 弹幕计时器
         self._fire_mode: str = self.MODE_FAN
         self._fire_timer: float = 0.0
         self._spiral_angle: float = 0.0
+        self._cross_angle: float = 0.0  # ⭐ 交叉弹幕旋转角
+
+        # ⭐ 战斗阶段系统
+        self._combat_phase: str = self.PHASE_1
+        self._prev_combat_phase: str = self.PHASE_1
+        self._phase_transition_timer: float = 0.0  # 阶段切换过渡计时
+        self._phase_transitioning: bool = False     # 是否正在切换
+        self._phase_flash_alpha: int = 0           # 切换时的闪屏alpha
 
         self.layer: int = LAYER_BOSS  # Boss 绘制在玩家层上方
         # Boss 专属颜色标记（血条使用）
@@ -544,6 +562,82 @@ class BossEnemy(Enemy):
 
     def set_player(self, player_sprite: pygame.sprite.Sprite) -> None:
         self._player = player_sprite
+
+    # ════════════════════════════════════════════════════════════════
+    # ⭐ 战斗阶段系统
+    # ════════════════════════════════════════════════════════════════
+
+    @property
+    def combat_phase(self) -> str:
+        """基于当前 HP 百分比返回战斗阶段。"""
+        ratio = self.hp / max(self.max_hp, 1)
+        if ratio <= 0.3:
+            return self.PHASE_3
+        elif ratio <= 0.7:
+            return self.PHASE_2
+        return self.PHASE_1
+
+    @property
+    def combat_phase_changed(self) -> bool:
+        """本轮帧是否有阶段切换（供外部检测）。"""
+        return self._prev_combat_phase != self._combat_phase
+
+    @property
+    def phase_name(self) -> str:
+        """战斗阶段的中文名称。"""
+        names = {
+            self.PHASE_1: "PHASE 1",
+            self.PHASE_2: "PHASE 2",
+            self.PHASE_3: "⚠ PHASE 3 ⚠",
+        }
+        return names.get(self._combat_phase, "PHASE 1")
+
+    def _update_combat_phase(self) -> None:
+        """每帧检测 HP 并更新战斗阶段，必要时触发过渡。"""
+        new_phase = self.combat_phase
+        if new_phase != self._combat_phase:
+            self._prev_combat_phase = self._combat_phase
+            self._combat_phase = new_phase
+            self._phase_transitioning = True
+            self._phase_transition_timer = 0.0
+            self._phase_flash_alpha = 200
+            # 战斗阶段切换：加速弹幕周期
+            if new_phase == self.PHASE_2:
+                self._fire_mode = self.MODE_CROSS  # 交叉弹幕起手
+            elif new_phase == self.PHASE_3:
+                self._fire_mode = self.MODE_SPIRAL  # 螺旋弹幕起手
+
+    def _get_phase_speed_mult(self) -> float:
+        """当前战斗阶段的速度倍率。"""
+        mults = {
+            self.PHASE_1: 1.0,
+            self.PHASE_2: 1.35,
+            self.PHASE_3: 1.8,
+        }
+        return mults.get(self._combat_phase, 1.0)
+
+    def _get_phase_fire_rate_mult(self) -> float:
+        """当前战斗阶段的射速倍率（越小越快）。"""
+        mults = {
+            self.PHASE_1: 1.0,
+            self.PHASE_2: 0.65,
+            self.PHASE_3: 0.4,
+        }
+        return mults.get(self._combat_phase, 1.0)
+
+    @property
+    def phase_color(self) -> tuple:
+        """当前战斗阶段对应的血条/文字颜色。"""
+        colors = {
+            self.PHASE_1: (220, 50, 50),
+            self.PHASE_2: (255, 160, 30),
+            self.PHASE_3: (255, 0, 0),
+        }
+        c = colors.get(self._combat_phase, (220, 50, 50))
+        # Phase 3 低血量闪烁
+        if self._combat_phase == self.PHASE_3 and int(pygame.time.get_ticks() / 150) % 2 == 0:
+            return (255, 255, 255)
+        return c
 
     # ================================================================
     # 移动
@@ -567,8 +661,9 @@ class BossEnemy(Enemy):
         self._y = start_y + (self._target_y - start_y) * progress
 
     def _move_patrol(self, dt: float) -> None:
-        """巡逻阶段：左右往复移动，碰壁反弹。"""
-        self._x += self.speed * self._patrol_dir * dt
+        """巡逻阶段：左右往复移动，碰壁反弹（速度受战斗阶段影响）。"""
+        speed = self.speed * self._get_phase_speed_mult()
+        self._x += speed * self._patrol_dir * dt
         half_w = self.rect.width / 2.0
         left_bound = BOSS_PATROL_MARGIN + half_w
         right_bound = SCREEN_WIDTH - BOSS_PATROL_MARGIN - half_w
@@ -588,21 +683,70 @@ class BossEnemy(Enemy):
         每帧调用，返回本帧需要发射的子弹列表。
         ————————————————————————————————
         主游戏循环将返回的子弹加入 bullets 组。
+        弹幕计时受战斗阶段射速倍率影响。
         """
         if self._phase != "patrol":
             return []  # 进入阶段不攻击
 
+        # ⭐ 检测战斗阶段切换
+        self._update_combat_phase()
+
+        # 阶段过渡动画
+        if self._phase_transitioning:
+            self._phase_transition_timer += dt
+            self._phase_flash_alpha = max(0, self._phase_flash_alpha - dt * 300)
+            if self._phase_transition_timer > 0.8:
+                self._phase_transitioning = False
+
+        # 射速倍率
+        rate_mult = self._get_phase_fire_rate_mult()
+
         self._fire_timer += dt
         bullets: list[Bullet] = []
 
+        # 根据当前战斗阶段和弹幕模式选择
         if self._fire_mode == self.MODE_FAN:
-            bullets = self._fire_fan()
+            interval = BOSS_FAN_INTERVAL * rate_mult
+            if self._fire_timer >= interval:
+                self._fire_timer = 0.0
+                bullets = self._fire_fan()
+                self._fire_mode = self.MODE_AIMED if self._combat_phase == self.PHASE_1 else self.MODE_CROSS
+
         elif self._fire_mode == self.MODE_CIRCLE:
-            bullets = self._fire_circle()
+            interval = BOSS_FIRE_INTERVAL_CIRCLE * rate_mult
+            if self._fire_timer >= interval:
+                self._fire_timer = 0.0
+                bullets = self._fire_circle()
+                self._fire_mode = self.MODE_FAN
+
         elif self._fire_mode == self.MODE_AIMED:
-            bullets = self._fire_aimed()
+            interval = BOSS_FIRE_INTERVAL_AIMED * rate_mult
+            if self._fire_timer >= interval:
+                self._fire_timer = 0.0
+                bullets = self._fire_aimed()
+                self._fire_mode = self.MODE_SPIRAL if self._combat_phase == self.PHASE_1 else self.MODE_CIRCLE
+
+        elif self._fire_mode == self.MODE_CROSS:
+            """交叉弹幕（Phase 2+）：双向旋转交叉线。"""
+            interval = BOSS_FIRE_INTERVAL_AIMED * rate_mult * 0.8
+            if self._fire_timer >= interval:
+                self._fire_timer = 0.0
+                bullets = self._fire_cross()
+                self._fire_mode = self.MODE_SPIRAL
+
         elif self._fire_mode == self.MODE_SPIRAL:
-            bullets = self._fire_spiral()
+            interval = BOSS_FIRE_INTERVAL_SPIRAL * rate_mult
+            if self._fire_timer >= interval:
+                self._fire_timer = 0.0
+                bullets = self._fire_spiral()
+                # 螺旋持续一段时间后切换
+                self._spiral_angle += 0.35 * self._get_phase_speed_mult()
+                spiral_max = 4.0 * math.pi
+                if self._combat_phase == self.PHASE_3:
+                    spiral_max = 6.0 * math.pi  # Phase 3 螺旋更久
+                if self._spiral_angle > spiral_max:
+                    self._spiral_angle = 0.0
+                    self._fire_mode = self.MODE_CIRCLE
 
         return bullets
 
@@ -735,12 +879,45 @@ class BossEnemy(Enemy):
         b._custom_velocity = True
         return [b]
 
+    # ════════════════════════════════════════════════════════════════
+    # ⭐ 交叉弹幕（Phase 2+ 新增）
+    # ════════════════════════════════════════════════════════════════
+
+    def _fire_cross(self) -> list[Bullet]:
+        """交叉弹幕：两条旋转的子弹线，呈 X 形交叉。"""
+        bullets: list[Bullet] = []
+        cx = self.rect.centerx
+        cy = self.rect.bottom
+
+        self._cross_angle += 0.15 * self._get_phase_speed_mult()
+        n = 6  # 每条线 6 发
+        speed_mult = self._get_phase_speed_mult()
+        base_speed = BOSS_BULLET_SPEED * 0.65 * speed_mult
+
+        for side in (0, 1):
+            offset = side * math.pi  # 两条线相差 180°
+            for i in range(n):
+                spread = (i - (n - 1) / 2) * 0.08
+                angle = self._cross_angle + offset + spread
+                vx = math.cos(angle) * base_speed
+                vy = math.sin(angle) * base_speed
+                # 确保子弹有向下的分量
+                if vy < 0.1:
+                    vy = 0.1
+                b = Bullet(cx, cy, BulletSource.ENEMY, direction=1,
+                           speed=base_speed, damage=BOSS_BULLET_DAMAGE, style="elite")
+                b._vx = vx
+                b._vy = vy
+                b._custom_velocity = True
+                bullets.append(b)
+        return bullets
+
     # ================================================================
-    # Boss 血条绘制
+    # Boss 血条绘制（增强：显示战斗阶段）
     # ================================================================
 
     def draw_hp_bar(self, screen: pygame.Surface) -> None:
-        """在屏幕顶部居中绘制 Boss 血条（题19：带名称标签和HP数值）。"""
+        """在屏幕顶部居中绘制 Boss 血条，含战斗阶段标记和颜色变化。"""
         bar_w = 320
         bar_h = 14
         bar_x = (SCREEN_WIDTH - bar_w) // 2
@@ -748,35 +925,37 @@ class BossEnemy(Enemy):
 
         hp_ratio = self.hp / max(self.max_hp, 1)
 
-        # Boss 名称标签
+        # Boss 名称标签 + ⭐ 战斗阶段标记
         try:
             font = pygame.font.Font(UI_FONT_PATH, 14)
         except Exception:
             font = pygame.font.Font(None, 14)
-        name_surf = font.render("BOSS", True, (255, 80, 80))
+        phase_label = self.phase_name
+        name_text = f"BOSS  {phase_label}"
+        name_surf = font.render(name_text, True, self.phase_color)
         name_rect = name_surf.get_rect(center=(bar_x + bar_w // 2, bar_y - 8))
         screen.blit(name_surf, name_rect)
+
+        # ⭐ 阶段过渡闪屏（Phase 切换时的白色闪光）
+        if self._phase_transitioning:
+            flash_surf = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            flash_surf.fill((255, 255, 255, min(255, int(self._phase_flash_alpha))))
+            screen.blit(flash_surf, (0, 0))
 
         # 背景（暗槽）
         pygame.draw.rect(screen, (20, 20, 20), (bar_x - 1, bar_y - 1, bar_w + 2, bar_h + 2))
         pygame.draw.rect(screen, (40, 40, 40), (bar_x, bar_y, bar_w, bar_h))
 
-        # HP 填充（颜色随血量变化 + 低血量闪烁）
+        # HP 填充（颜色随战斗阶段变化 + 低血量闪烁）
         if hp_ratio > 0:
-            if hp_ratio > 0.6:
-                color = (220, 50, 50)
-            elif hp_ratio > 0.3:
-                color = (255, 140, 30)
-            else:
-                # 低于30%血量红闪烁
-                color = (255, 30, 30) if int(pygame.time.get_ticks() / 120) % 2 == 0 else (255, 80, 80)
+            fill_color = self.phase_color
             fill_w = int(bar_w * hp_ratio)
             if fill_w > 0:
-                pygame.draw.rect(screen, color, (bar_x, bar_y, fill_w, bar_h))
+                pygame.draw.rect(screen, fill_color, (bar_x, bar_y, fill_w, bar_h))
                 # 高亮顶部边缘（立体感）
                 if fill_w > 2:
-                    pygame.draw.rect(screen, (255, 160, 140),
-                                   (bar_x, bar_y, fill_w, 3))
+                    hl = tuple(min(255, c + 60) for c in fill_color)
+                    pygame.draw.rect(screen, hl, (bar_x, bar_y, fill_w, 3))
 
         # 边框
         pygame.draw.rect(screen, (200, 200, 200),
