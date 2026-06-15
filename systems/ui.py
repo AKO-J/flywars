@@ -343,6 +343,12 @@ class UISystem:
         bomb_color = (255, 200, 60) if player.bomb_count > 0 else (80, 80, 80)
         bomb_label = self._font_small.render(bomb_text, True, bomb_color)
         screen.blit(bomb_label, (x0 + bar_w - 34, y))
+
+        # ── 额外命（⭐ Boss奖励）──
+        if player.extra_lives > 0:
+            life_text = f"❤️ ×{player.extra_lives}"
+            life_label = self._font_small.render(life_text, True, (255, 80, 80))
+            screen.blit(life_label, (x0, y))
         y += 20
 
         # ── 第2行：蓄力状态 ──

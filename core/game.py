@@ -1056,6 +1056,15 @@ class Game:
                 self._last_sent_x = px
                 self._last_sent_y = py
 
+        # ⭐ 检测复活
+        if self.player._just_revived:
+            self.player._just_revived = False
+            self.particles.level_up_ring(self.player.rect.centerx, self.player.rect.centery)
+            self.ui.add_pickup_text(self.player.rect.centerx, self.player.rect.centery - 40,
+                                    "❤️ 复活!", color=(255, 80, 80))
+            self._screen_shake = max(self._screen_shake, 6.0)
+            self.audio.play_explosion()
+
         # ---- 碰撞检测 ----
         _hp_before = self.player.hp
         alive: bool = self.collision.handle_all(
@@ -1084,6 +1093,11 @@ class Game:
             self._event_bus.publish(Event(GameEvent.ENEMY_KILLED, {
                 "is_boss": True, "score": 1000, "level": self.spawner.level,
             }))
+            # ⭐ 击败 Boss 奖励一条命
+            self.player.extra_lives += 1
+            # 显示复活提示飘字
+            self.ui.add_pickup_text(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 40,
+                                    "❤️ +1 命", color=(255, 80, 80))
 
         # 生成爆炸
         if self.collision.explosion_positions:
@@ -1110,10 +1124,20 @@ class Game:
                 "is_boss": False, "size": esize,
                 "x": pos[0], "y": pos[1],
             }))
-        # ⭐ 命中火花：粒子爆发 + 屏幕震动
-        for sx, sy, intensity in self.collision.hit_sparks:
+        # ⭐ 命中火花：粒子爆发 + 屏幕震动 + 伤害数字
+        for h in self.collision.hit_sparks:
+            sx, sy = h["x"], h["y"]
+            dmg = h["damage"]
+            killed = h["killed"]
+            # 粒子火花（伤害越大火花越多）
+            intensity = "big" if dmg >= 3 else "normal"
             self.particles.hit_spark(sx, sy, intensity)
-            self._screen_shake = max(self._screen_shake, 1.0)
+            # 屏幕震动随伤害增加
+            shake = min(3.0, 0.5 + dmg * 0.4)
+            self._screen_shake = max(self._screen_shake, shake)
+            # 未击杀时显示伤害数字
+            if not killed and dmg > 0:
+                self.ui.add_pickup_text(sx, sy, f"-{dmg}", color=(255, 200, 100))
         # 飘字得分
         for x, y, sv in self.collision.floating_texts:
             self.ui.add_score_text(x, y, sv)
@@ -2455,6 +2479,8 @@ class Game:
         self.all_sprites.add(self.player)
         # ⭐ 应用永久升级
         apply_upgrades_to_player(self.player, self.upgrade_data)
+        # ⭐ 额外命继承自升级数据（每5级+1命开局）
+        self.player.extra_lives = self.upgrade_data.level // 5
 
         self.spawner.reset()
         self.spawner.set_player(self.player)

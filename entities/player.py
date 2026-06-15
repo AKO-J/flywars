@@ -113,6 +113,9 @@ class Player(pygame.sprite.DirtySprite):
         # ⭐ 炸弹系统
         self.bomb_count: int = 0
         self.max_bombs: int = PLAYER_MAX_BOMBS
+        # ⭐ 复活命（击败Boss奖励）
+        self.extra_lives: int = 0
+        self._just_revived: bool = False
         self._extra_damage: int = 0       # 额外伤害
         self._spread_upgrade: int = 0     # 额外弹幕扩散数
 
@@ -512,21 +515,29 @@ class Player(pygame.sprite.DirtySprite):
 
     def take_damage(self, amount: int) -> bool:
         """
-        受到伤害。
+        受到伤害（⭐ 支持复活机制）。
         ————————————————————————————————
         检查无敌状态：无敌中则忽略伤害。
         扣血后进入无敌状态（1.5秒），防止连续受伤。
+        如果 HP 归零且有额外命 → 消耗一命复活。
 
         返回值：
-            bool — True 表示玩家死亡（hp ≤ 0）
+            bool — True 表示玩家死亡（hp ≤ 0 且无额外命）
         """
         if self._invincible_timer > 0:
             return False  # 无敌中，忽略伤害
 
         self.hp -= amount
         if self.hp <= 0:
+            # ⭐ 复活：消耗一条命，恢复满血
+            if self.extra_lives > 0:
+                self.extra_lives -= 1
+                self.hp = self.max_hp
+                self._invincible_timer = 2.0  # 复活后2秒无敌
+                self._just_revived = True  # 标记供 Game 层处理特效
+                return False  # 没死，复活了
             self.hp = 0
-            return True  # 死亡
+            return True  # 真正死亡
 
         # 进入无敌状态
         self._invincible_timer = self._invincible_duration

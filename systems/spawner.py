@@ -229,11 +229,15 @@ class Spawner:
 
         # ---- 检查波次是否清空（生成队列空 + 场上无敌机） ----
         if self.wave_cleared:
-            # 走完所有波次 → 等 Boss 逻辑
+            # 走完所有波次
             if self._wave_index >= self._total_waves - 1:
-                # 最后一波清完，无 Boss 波 → 直接通关
                 if not self._has_boss:
-                    pass  # Game 层检测 level_complete
+                    # 无 Boss 关 → 直接标记完成
+                    self._wave_index = self._total_waves
+                else:
+                    # ⭐ 有 Boss 关 → 进入短暂休息后出 Boss
+                    self._is_resting = True
+                    self._rest_timer = WAVE_REST_DURATION
                 return new_boss
             # 进入波间休息
             self._is_resting = True

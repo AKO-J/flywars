@@ -59,8 +59,8 @@ class CollisionSystem:
         self.kills_this_frame: int = 0  # 本帧击杀数（供网络同步）
         # ⭐ 本局累计经验（供成长系统）
         self.xp_earned: int = 0
-        # ⭐ 命中火花位置 [(x, y, intensity), ...]
-        self.hit_sparks: list[tuple[int, int, str]] = []
+        # ⭐ 命中火花位置（含伤害值）
+        self.hit_sparks: list[dict] = []
         # ⭐ Combo 加分飘字 [(x, y, bonus), ...]
         self.combo_bonus_texts: list[tuple[int, int, int]] = []
         # ⭐ 空间哈希（精灵数多时启用）
@@ -196,9 +196,13 @@ class CollisionSystem:
                         continue
                     bullet._hit_enemies.add(id(enemy))
                 killed = enemy.take_damage(bullet.damage)
-                # ⭐ 命中火花：每次命中都产生（无论是否击杀）
-                spark_size = "big" if bullet.damage >= 3 else "normal"
-                self.hit_sparks.append((bullet.rect.centerx, bullet.rect.centery, spark_size))
+                # ⭐ 命中火花：每次命中产生，携带伤害值用于反馈
+                self.hit_sparks.append({
+                    "x": bullet.rect.centerx,
+                    "y": bullet.rect.centery,
+                    "damage": bullet.damage,
+                    "killed": killed,
+                })
                 if killed:
                     self._on_enemy_killed(enemy)
             # 非穿透弹命中后销毁
