@@ -121,6 +121,14 @@ class AudioSystem:
             return
         self._bgm_channel_obj.stop()
 
+    def reset(self) -> None:
+        """重置音频状态（新游戏时调用：确保音量正确、BGM 未播放）。"""
+        if not self._ready:
+            return
+        self._bgm_channel_obj.stop()
+        self.set_sfx_volume(self._sfx_volume)
+        self._bgm.set_volume(self._bgm_volume)
+
     def set_sfx_volume(self, volume: float) -> None:
         """设置音效音量，取值范围 0.0 ~ 1.0。超出范围自动钳位。"""
         self._sfx_volume = max(0.0, min(1.0, volume))

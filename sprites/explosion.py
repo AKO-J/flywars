@@ -84,7 +84,7 @@ class Explosion(pygame.sprite.DirtySprite):
           帧 2-15  : 多色散射粒子向外飞溅
           帧 8-15  : 暗色尾烟消散
         """
-        size_map = {"spark": 20, "normal": 48, "big": 72, "huge": 100}
+        size_map = {"spark": 40, "normal": 96, "big": 144, "huge": 200}
         render_size: int = size_map.get(size_name, 48)
         half: float = render_size / 2.0
         n: int = EXPLOSION_FRAME_COUNT
@@ -116,23 +116,25 @@ class Explosion(pygame.sprite.DirtySprite):
                 if ring_alpha > 0 and ring_r > 2:
                     pygame.draw.circle(
                         surf, (255, 160, 30, ring_alpha),
-                        (int(half), int(half)), ring_r, width=max(3, int(render_size / 16))
+                        (int(half), int(half)), ring_r, width=max(4, int(render_size / 12))
                     )
-                    if ring_r > 10:
+                    if ring_r > 15:
                         pygame.draw.circle(
                             surf, (255, 210, 100, ring_alpha // 2),
                             (int(half), int(half)), ring_r - 5, width=1
                         )
 
             # ---- 阶段3：散射粒子（全程，含颜色变化） ----
-            num_particles: int = 18 if render_size >= 72 else (12 if render_size >= 48 else 8)
+            num_particles: int = 28 if render_size >= 140 else (20 if render_size >= 80 else 12)
             for j in range(num_particles):
                 angle: float = j * 2.0 * math.pi / num_particles + progress * 1.3
                 dist: float = progress * half * 0.92
                 px: float = half + math.cos(angle) * dist
                 py: float = half + math.sin(angle) * dist
                 pa: int = int(255 * (1.0 - progress * 0.85))
-                pr: int = max(1, int(4.5 * (1.0 - progress * 0.6))) if render_size >= 72 else max(1, int(3.5 * (1.0 - progress * 0.6)))
+                pr: int = max(1, int(6.5 * (1.0 - progress * 0.6))) if render_size >= 140 else (
+                    max(1, int(5.0 * (1.0 - progress * 0.6))) if render_size >= 80 else
+                    max(1, int(3.5 * (1.0 - progress * 0.6))))
                 if j % 3 == 0:
                     color = (255, 210, 70, pa)
                 elif j % 3 == 1:
@@ -147,7 +149,7 @@ class Explosion(pygame.sprite.DirtySprite):
                 smoke_alpha: int = int(70 * (1.0 - sp))
                 if smoke_alpha > 0:
                     rng = random.Random(i * 37 + 1)
-                    for _ in range(8 if render_size >= 72 else 6):
+                    for _ in range(14 if render_size >= 140 else (10 if render_size >= 80 else 8)):
                         sx: float = half + rng.uniform(-0.55, 0.55) * half * sp * 1.3
                         sy: float = half + rng.uniform(-0.55, 0.55) * half * sp * 1.3
                         sr: float = rng.uniform(1.5, 5.0) * (1.0 - sp * 0.5)

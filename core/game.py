@@ -550,9 +550,9 @@ class Game:
                         save_upgrades(self.upgrade_data)
                         print(f"[UPGRADE] 已强化 {items[self._upgrade_selected]['name']}")
                         if self.upgrade_data.points <= 0:
-                            self._go_to_menu()
+                            self.state = GameState.MENU  # 都用完了，直接回菜单
             elif key == pygame.K_ESCAPE or key == pygame.K_q:
-                self._go_to_menu()
+                self.state = GameState.MENU  # 直接回菜单，无需再次清理
 
     def _handle_keyup(self, event: pygame.event.Event) -> None:
         if self.state == GameState.PLAYING:
@@ -2082,6 +2082,7 @@ class Game:
 
         self.collision.reset()
         self.ui.reset()
+        self.audio.reset()  # ⭐ 重置音频状态
         self._boss = None
         self._boss_dying = False
         self._boss_dying_positions.clear()
@@ -2108,8 +2109,8 @@ class Game:
         self.all_sprites.add(self.player)
         self.spawner.set_player(self.player)
 
-        # 保留分数（菜单界面展示"上一局得分"），只重置 UI 状态
         self.ui.reset()
+        self.audio.reset()  # ⭐ 重置音频状态
         self._boss = None
         self._screen_shake = 0.0
         self.audio.stop_bgm()
@@ -2141,6 +2142,7 @@ class Game:
         self.all_sprites.add(self.player)
         self.spawner.set_player(self.player)
         self.ui.reset()
+        self.audio.reset()  # ⭐ 重置音频状态
         self._boss = None
         self._screen_shake = 0.0
         self.audio.stop_bgm()
