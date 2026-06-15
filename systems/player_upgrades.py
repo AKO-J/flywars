@@ -34,6 +34,14 @@ from settings import (
     UI_FONT_PATH,
     BLACK, WHITE, RED, GREEN, YELLOW, CYAN, ORANGE,
     DARK_GRAY, GRAY,
+    # ⭐ 阈值质变常量
+    PLAYER_HP_REGEN_INTERVAL, PLAYER_ARMOR_DAMAGE_REDUCTION,
+    PLAYER_BULLET_SIZE_BONUS, PLAYER_CRIT_CHANCE,
+    PLAYER_OVERCHARGE_THRESHOLD, PLAYER_CHARGE_RETAIN,
+    PLAYER_TURBO_CHARGE_MULT,
+    PLAYER_DIAGONAL_PENALTY_UPGRADE, PLAYER_HURT_SPEED_BOOST,
+    PLAYER_HURT_SPEED_DURATION, PLAYER_MOVE_FIRE_BONUS,
+    PLAYER_SHIELD_BONUS_TIME, PLAYER_REVIVE_EXTRA_TIME,
 )
 
 
@@ -49,6 +57,11 @@ UPGRADE_DEFS: list[dict] = [
         "max_level": UPGRADE_MAX_LEVEL,
         "icon": "❤️",
         "color": (255, 60, 60),
+        "thresholds": {
+            3: "细胞活化：自动回血",
+            5: "护甲：受伤-1",
+            8: "不朽：每局免死1次",
+        },
     },
     {
         "id": "damage",
@@ -57,14 +70,24 @@ UPGRADE_DEFS: list[dict] = [
         "max_level": UPGRADE_MAX_LEVEL,
         "icon": "⚡",
         "color": (255, 200, 50),
+        "thresholds": {
+            3: "锐利弹头：子弹增大",
+            5: "暴击：10% 双倍伤害",
+            8: "穿透弹：穿透敌人",
+        },
     },
     {
         "id": "charge_speed",
         "name": "🔥 蓄力加速",
-        "desc": "蓄力时间 ×0.92",
+        "desc": "蓄力时间 ×0.85",
         "max_level": UPGRADE_MAX_LEVEL,
         "icon": "🔥",
         "color": (255, 120, 30),
+        "thresholds": {
+            3: "二阶蓄力：超蓄150%",
+            5: "蓄力保留：发射剩40%",
+            8: "涡轮充能：蓄力再加速",
+        },
     },
     {
         "id": "speed",
@@ -73,6 +96,11 @@ UPGRADE_DEFS: list[dict] = [
         "max_level": UPGRADE_MAX_LEVEL,
         "icon": "💨",
         "color": (80, 200, 255),
+        "thresholds": {
+            3: "轻量化：斜向惩罚降低",
+            5: "受伤加速：受伤提速40%",
+            8: "风行者：移动射速+25%",
+        },
     },
     {
         "id": "spread",
@@ -81,6 +109,10 @@ UPGRADE_DEFS: list[dict] = [
         "max_level": 3,
         "icon": "🌊",
         "color": (80, 255, 180),
+        "thresholds": {
+            2: "加宽展开：弹幕更宽",
+            3: "扇形弹幕：散射覆盖",
+        },
     },
     {
         "id": "shield",
@@ -89,6 +121,11 @@ UPGRADE_DEFS: list[dict] = [
         "max_level": UPGRADE_MAX_LEVEL,
         "icon": "🛡️",
         "color": (100, 150, 255),
+        "thresholds": {
+            3: "强化护盾：无敌+0.5s",
+            5: "脉冲反击：无敌反击弹",
+            8: "凤凰涅槃：复活延长3s",
+        },
     },
 ]
 
@@ -178,6 +215,15 @@ class PlayerUpgradeData:
         result = []
         for d in UPGRADE_DEFS:
             current = self.upgrades.get(d["id"], 0)
+            # 计算已解锁的阈值
+            unlocked = []
+            if "thresholds" in d:
+                for req_lv, desc in sorted(d["thresholds"].items()):
+                    unlocked.append({
+                        "level": req_lv,
+                        "desc": desc,
+                        "active": current >= req_lv,
+                    })
             result.append({
                 "id": d["id"],
                 "name": d["name"],
@@ -185,6 +231,7 @@ class PlayerUpgradeData:
                 "current": current,
                 "max": d["max_level"],
                 "color": d["color"],
+                "thresholds": unlocked,
             })
         return result
 
@@ -247,52 +294,103 @@ def save_upgrades(data: PlayerUpgradeData) -> None:
 
 def apply_upgrades_to_player(player, upgrades: PlayerUpgradeData) -> None:
     """
-    根据升级数据修改玩家实体的基础属性。
+    根据升级数据修改玩家实体的基础属性 + ⭐ 阈值质变效果。
     在 Player.reset() 或新游戏开始时调用。
     """
     lv_hp = upgrades.get_upgrade_level("hp")
     lv_damage = upgrades.get_upgrade_level("damage")
     lv_charge = upgrades.get_upgrade_level("charge_speed")
     lv_speed = upgrades.get_upgrade_level("speed")
+    lv_spread = upgrades.get_upgrade_level("spread")
     lv_shield = upgrades.get_upgrade_level("shield")
 
-    # 生命强化
+    # ================================================================
+    # ❤️ 生命强化（线性 + 阈值）
+    # ================================================================
     player.max_hp = PLAYER_MAX_HP + lv_hp
     player.hp = player.max_hp
+    # Lv.3 细胞活化：自动回血
+    player._regen_interval = PLAYER_HP_REGEN_INTERVAL if lv_hp >= 3 else 0.0
+    # Lv.5 护甲：减伤
+    player._armor = PLAYER_ARMOR_DAMAGE_REDUCTION if lv_hp >= 5 else 0
+    # Lv.8 不朽：免死
+    player._immortality = True if lv_hp >= 8 else False
 
-    # 火力提升
+    # ================================================================
+    # ⚡ 火力提升（线性 + 阈值）
+    # ================================================================
     player._extra_damage = lv_damage
+    # Lv.3 锐利弹头
+    player._bullet_size_bonus = PLAYER_BULLET_SIZE_BONUS if lv_damage >= 3 else 0
+    # Lv.5 暴击
+    player._crit_chance = PLAYER_CRIT_CHANCE if lv_damage >= 5 else 0.0
+    # Lv.8 穿透弹
+    player._pierce_shot = True if lv_damage >= 8 else False
 
-    # 蓄力加速（⭐ 每级 ×0.85 原×0.92）
+    # ================================================================
+    # 🔥 蓄力加速（线性 + 阈值）
+    # ================================================================
     if lv_charge > 0:
         player._charge_time = PLAYER_CHARGE_TIME * (PLAYER_CHARGE_MULT_PER_UPGRADE ** lv_charge)
     else:
         player._charge_time = PLAYER_CHARGE_TIME
+    # Lv.3 二阶蓄力：上限提至150%
+    player._overcharge_max = PLAYER_OVERCHARGE_THRESHOLD if lv_charge >= 3 else 1.0
+    # Lv.5 蓄力保留
+    player._charge_retain = PLAYER_CHARGE_RETAIN if lv_charge >= 5 else 0.0
+    # Lv.8 涡轮充能
+    player._turbo_mult = PLAYER_TURBO_CHARGE_MULT if lv_charge >= 8 else 1.0
 
-    # 机动增强（⭐ 每级 +2 原+1）
+    # ================================================================
+    # 💨 机动增强（线性 + 阈值）
+    # ================================================================
     player.base_speed = PLAYER_SPEED + lv_speed * PLAYER_SPEED_PER_UPGRADE
+    # Lv.3 轻量化：斜向惩罚改善
+    player._diagonal_penalty = PLAYER_DIAGONAL_PENALTY_UPGRADE if lv_speed >= 3 else 0.707
+    # Lv.5 受伤加速
+    if lv_speed >= 5:
+        player._speed_boost_mult = PLAYER_HURT_SPEED_BOOST
+    else:
+        player._speed_boost_mult = 1.0
+        player._speed_boost_timer = 0.0
+    # Lv.8 风行者：移动时射速提升
+    player._move_fire_bonus = PLAYER_MOVE_FIRE_BONUS if lv_speed >= 8 else 1.0
 
-    # 护盾精通
+    # ================================================================
+    # 🌊 弹幕扩散（线性 + 阈值）
+    # ================================================================
+    player._spread_upgrade = lv_spread
+    # Lv.2 加宽展开：弹幕间距从7→10
+    player._spread_spacing = PLAYER_SPREAD_SPACING_UPGRADE if lv_spread >= 2 else 7
+    # Lv.3 扇形弹幕：启用扇形散射
+    player._spread_angle = PLAYER_SPREAD_ANGLE if lv_spread >= 3 else 0.0
+
+    # ================================================================
+    # 🛡️ 护盾精通（线性 + 阈值）
+    # ================================================================
     if lv_shield > 0:
         player._invincible_duration = PLAYER_INVINCIBLE_TIME + lv_shield * 0.3
     else:
         player._invincible_duration = PLAYER_INVINCIBLE_TIME
+    # Lv.3 强化护盾：额外无敌时间（在 take_damage 中 +_shield_bonus）
+    player._shield_bonus = PLAYER_SHIELD_BONUS_TIME if lv_shield >= 3 else 0.0
+    # Lv.5 脉冲反击
+    player._counter_shot = True if lv_shield >= 5 else False
+    # Lv.8 凤凰涅槃
+    player._revive_extra_time = PLAYER_REVIVE_EXTRA_TIME if lv_shield >= 8 else 0.0
 
-    # 弹幕扩散（⭐ 蓄力和基础射击都加弹）
-    player._spread_upgrade = upgrades.get_upgrade_level("spread")
-
-    # ⭐ 视觉反馈：根据火力等级改变子弹颜色/大小
+    # ⭐ 视觉反馈：根据火力等级改变子弹颜色/大小（保留原有）
     if lv_damage >= 5:
-        player._bullet_color_override = (255, 50, 50)   # 高火力：红色
-        player._bullet_size_override = 3                 # 子弹更大
+        player._bullet_color_override = (255, 50, 50)
+        player._bullet_size_override = 3
     elif lv_damage >= 3:
-        player._bullet_color_override = (255, 180, 50)  # 中火力：金色
+        player._bullet_color_override = (255, 180, 50)
         player._bullet_size_override = 2
     elif lv_damage >= 1:
-        player._bullet_color_override = (100, 200, 255) # 低火力：青色
+        player._bullet_color_override = (100, 200, 255)
         player._bullet_size_override = 1
     else:
-        player._bullet_color_override = None             # 默认白色
+        player._bullet_color_override = None
         player._bullet_size_override = 0
 
 
@@ -356,10 +454,10 @@ def render_upgrade_screen(
     # ---- 强化列表 ----
     items = data.get_levels_for_display()
     start_y = header_y + 85 if show_level_up and level_up_count > 0 else header_y + 70
-    item_h = 58
-    item_w = 360
+    item_h = 92  # ⭐ 加高以容纳阈值标记
+    item_w = 400
     total_h = len(items) * item_h + 10
-    list_x = (SCREEN_WIDTH - item_w) // 2
+    list_x = max(10, (SCREEN_WIDTH - item_w) // 2 - 20)
     list_y = start_y
 
     for i, item in enumerate(items):
@@ -383,17 +481,30 @@ def render_upgrade_screen(
         name = item_font.render(item["name"], True, name_color)
         screen.blit(name, (list_x + 12, y + 6))
 
-        # 等级条
+        # 等级条（带阈值标记）
         dot_size = 10
         dot_gap = 4
         dots_start_x = list_x + 120
         dots_y = y + 10
         for d in range(item["max"]):
             dx = dots_start_x + d * (dot_size + dot_gap)
-            if d < item["current"]:
-                pygame.draw.rect(screen, item["color"], (dx, dots_y, dot_size, dot_size))
+            is_active = d < item["current"]
+            # 检查 d+1 是否为阈值等级
+            threshold_level = d + 1
+            is_threshold = any(t["level"] == threshold_level for t in item.get("thresholds", []))
+
+            if is_active:
+                color = item["color"]
+                # 阈值等级用星号标记
+                if is_threshold:
+                    pygame.draw.rect(screen, (255, 255, 255), (dx - 1, dots_y - 1, dot_size + 2, dot_size + 2))
+                pygame.draw.rect(screen, color, (dx, dots_y, dot_size, dot_size))
             else:
-                pygame.draw.rect(screen, (40, 40, 50), (dx, dots_y, dot_size, dot_size))
+                if is_threshold:
+                    # 未解锁的阈值用淡色空心框
+                    pygame.draw.rect(screen, (60, 60, 80), (dx, dots_y, dot_size, dot_size), width=1)
+                else:
+                    pygame.draw.rect(screen, (40, 40, 50), (dx, dots_y, dot_size, dot_size))
 
         # 等级数字
         lv_label = small_font.render(f"{item['current']}/{item['max']}", True, GRAY)
@@ -401,7 +512,22 @@ def render_upgrade_screen(
 
         # 描述
         desc = small_font.render(item["desc"], True, (140, 140, 160))
-        screen.blit(desc, (list_x + 12, y + 30))
+        screen.blit(desc, (list_x + 12, y + 28))
+
+        # ⭐ 阈值状态行
+        thresholds = item.get("thresholds", [])
+        if thresholds:
+            tx = list_x + 12
+            ty = y + 44
+            for t in thresholds:
+                active = t["active"]
+                color = GREEN if active else (80, 80, 100)
+                prefix = "✓" if active else "■"
+                t_text = small_font.render(f"{prefix} Lv.{t['level']} {t['desc']}", True, color)
+                screen.blit(t_text, (tx, ty))
+                ty += 16
+                if ty > y + item_h - 6:
+                    break  # 防溢出
 
         # 选中标记
         if is_selected:
@@ -425,16 +551,29 @@ def render_upgrade_screen(
 
     # ---- 属性总览（右侧面板） ----
     # 在右侧显示当前综合属性
-    panel_x = list_x + item_w + 20
+    panel_x = list_x + item_w + 12
     panel_y = start_y
+    lv_hp = data.get_upgrade_level("hp")
+    lv_dmg = data.get_upgrade_level("damage")
+    lv_chg = data.get_upgrade_level("charge_speed")
+    lv_spd = data.get_upgrade_level("speed")
+    lv_spr = data.get_upgrade_level("spread")
+    lv_shd = data.get_upgrade_level("shield")
+
     stats = [
-        f"❤️ HP: {PLAYER_MAX_HP + data.get_upgrade_level('hp')}",
-        f"⚡ 伤害: {PLAYER_BULLET_DAMAGE + data.get_upgrade_level('damage')}",
-        f"🔥 蓄力: {PLAYER_CHARGE_TIME * (PLAYER_CHARGE_MULT_PER_UPGRADE ** data.get_upgrade_level('charge_speed')):.2f}s",
-        f"💨 速度: {PLAYER_SPEED + data.get_upgrade_level('speed') * PLAYER_SPEED_PER_UPGRADE}",
-        f"🌊 弹幕: +{data.get_upgrade_level('spread')}",
-        f"🛡️ 无敌: {PLAYER_INVINCIBLE_TIME + data.get_upgrade_level('shield') * 0.3:.1f}s",
+        f"❤️ HP: {PLAYER_MAX_HP + lv_hp}",
+        f"   Lv.3↔{'✓' if lv_hp >= 3 else ' '}  Lv.5↔{'✓' if lv_hp >= 5 else ' '}  Lv.8↔{'✓' if lv_hp >= 8 else ' '}",
+        f"⚡ 伤害: {PLAYER_BULLET_DAMAGE + lv_dmg}",
+        f"   Lv.3↔{'✓' if lv_dmg >= 3 else ' '}  Lv.5↔{'✓' if lv_dmg >= 5 else ' '}  Lv.8↔{'✓' if lv_dmg >= 8 else ' '}",
+        f"🔥 蓄力: {PLAYER_CHARGE_TIME * (PLAYER_CHARGE_MULT_PER_UPGRADE ** lv_chg):.2f}s",
+        f"   Lv.3↔{'✓' if lv_chg >= 3 else ' '}  Lv.5↔{'✓' if lv_chg >= 5 else ' '}  Lv.8↔{'✓' if lv_chg >= 8 else ' '}",
+        f"💨 速度: {PLAYER_SPEED + lv_spd * PLAYER_SPEED_PER_UPGRADE}",
+        f"   Lv.3↔{'✓' if lv_spd >= 3 else ' '}  Lv.5↔{'✓' if lv_spd >= 5 else ' '}  Lv.8↔{'✓' if lv_spd >= 8 else ' '}",
+        f"🌊 弹幕: +{lv_spr}",
+        f"   Lv.2↔{'✓' if lv_spr >= 2 else ' '}  Lv.3↔{'✓' if lv_spr >= 3 else ' '}",
+        f"🛡️ 无敌: {PLAYER_INVINCIBLE_TIME + lv_shd * 0.3:.1f}s",
+        f"   Lv.3↔{'✓' if lv_shd >= 3 else ' '}  Lv.5↔{'✓' if lv_shd >= 5 else ' '}  Lv.8↔{'✓' if lv_shd >= 8 else ' '}",
     ]
     for si, stat in enumerate(stats):
         s = small_font.render(stat, True, (160, 170, 190))
-        screen.blit(s, (panel_x, panel_y + si * 20))
+        screen.blit(s, (panel_x, panel_y + si * 16))

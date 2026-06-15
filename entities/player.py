@@ -13,6 +13,7 @@
 
 import time
 import math
+import random
 import pygame
 from settings import (
     SCREEN_WIDTH, SCREEN_HEIGHT,
@@ -29,9 +30,19 @@ from settings import (
     POWERUP_DURATION, PLAYER_MAX_BOMBS,
     PowerUpType,
     PLAYER_IMAGE_PATH,
+    # ⭐ 阈值质变常量
+    PLAYER_CRIT_DAMAGE_MULT, PLAYER_HURT_SPEED_DURATION,
 )
 from utils.resource_manager import load_image, rotate_image
 from entities.bullet import Bullet, BulletSource
+
+
+# ⭐ 暴击子弹着色辅助
+def _tint_bullet_gold(bullet: Bullet) -> None:
+    """给子弹叠加金色色调（暴击指示）。"""
+    tint = pygame.Surface(bullet.image.get_size(), pygame.SRCALPHA)
+    tint.fill((255, 215, 0, 80))  # 金色半透明
+    bullet.image.blit(tint, (0, 0), special_flags=pygame.BLEND_RGBA_ADD)
 
 
 class Player(pygame.sprite.DirtySprite):
@@ -118,6 +129,38 @@ class Player(pygame.sprite.DirtySprite):
         self._just_revived: bool = False
         self._extra_damage: int = 0       # 额外伤害
         self._spread_upgrade: int = 0     # 额外弹幕扩散数
+        # ⭐ 弹幕扩散阈值属性
+        self._spread_spacing: int = 7      # Lv.2: 弹幕间距
+        self._spread_angle: float = 0.0    # Lv.3: 扇形角度（>0激活）
+
+        # ================================================================
+        # ⭐ 阈值质变 — 额外属性（由 apply_upgrades_to_player 设置）
+        # ================================================================
+        # ❤️ 生命强化
+        self._regen_timer: float = 0.0        # Lv.3: 自动回血计时器
+        self._regen_interval: float = 0.0     # Lv.3: 回血间隔（0=未激活）
+        self._armor: int = 0                  # Lv.5: 护甲减伤值
+        self._immortality: bool = False       # Lv.8: 免死标记（消耗后False）
+        # ⚡ 火力提升
+        self._bullet_size_bonus: int = 0      # Lv.3: 子弹尺寸增大（px）
+        self._crit_chance: float = 0.0        # Lv.5: 暴击率
+        self._crit_chance_dynamic: float = 0.0 # 连击暴击加成（15连击+10%）
+        self._pierce_shot: bool = False       # Lv.8: 穿透弹（等效PIERCE）
+        # 🔥 蓄力加速
+        self._overcharge_max: float = 1.0     # Lv.3: 二阶蓄力上限（>1.0激活）
+        self._charge_retain: float = 0.0      # Lv.5: 发射后保留比例
+        self._turbo_mult: float = 1.0         # Lv.8: 额外蓄力加速倍率（<1更快）
+        # 💨 机动增强
+        self._diagonal_penalty: float = 0.707 # Lv.3: 斜向惩罚系数
+        self._speed_boost_timer: float = 0.0  # Lv.5: 受伤加速剩余时间
+        self._speed_boost_mult: float = 1.0   # Lv.5: 受伤加速倍率
+        self._move_fire_bonus: float = 1.0    # Lv.8: 移动时连射间隔系数
+        # 🛡️ 护盾精通
+        self._shield_bonus: float = 0.0       # Lv.3: 额外无敌时间
+        self._counter_shot: bool = False      # Lv.5: 无敌反击
+        self._revive_extra_time: float = 0.0  # Lv.8: 复活额外无敌时间
+        # 待添加的反击弹（Game层读取并添加到子弹组）
+        self._pending_counter_shots: list = []
 
         # ⭐ 自动连射系统
         self._auto_fire_timer: float = 0.0
@@ -206,6 +249,9 @@ class Player(pygame.sprite.DirtySprite):
         self._update_invincible(dt)
         # ①.⑥ 更新道具 Buff 计时器
         self._update_powerup(dt)
+        # ⭐ ①.⑦ 更新阈值质变计时器
+        self._update_regen(dt)
+        self._update_speed_boost(dt)
 
         # ② 读取输入 → 获取 (dx, dy) 移动增量
         dx, dy, move_left, move_right = self._read_input()
@@ -228,11 +274,14 @@ class Player(pygame.sprite.DirtySprite):
         更新蓄力值（随时间自动增长）。
         ————————————————————————————————
         RAPID_FIRE 道具：蓄力速度加倍。
+        ⭐ Lv.3 二阶蓄力：蓄满后可继续充能至 _overcharge_max
+        ⭐ Lv.8 涡轮充能：额外加速倍率 _turbo_mult
         """
         multiplier = 2.0 if PowerUpType.RAPID_FIRE in self._active_powerups else 1.0
+        multiplier *= self._turbo_mult  # ⭐ Lv.8 涡轮充能
         self._charge_level += dt / self._charge_time * multiplier
-        if self._charge_level > 1.0:
-            self._charge_level = 1.0
+        if self._charge_level > self._overcharge_max:  # ⭐ 支持二阶蓄力上限
+            self._charge_level = self._overcharge_max
 
     # ====================================================================
     # 输入读取（核心：方案对比）
@@ -276,9 +325,13 @@ class Player(pygame.sprite.DirtySprite):
         current_speed: float = (
             self.base_speed * self.boost_multiplier if boost else self.base_speed
         )
+        # ⭐ Lv.5 受伤加速
+        if self._speed_boost_timer > 0 and self._speed_boost_mult > 1.0:
+            current_speed *= self._speed_boost_mult
         # 斜向移动时保持速度一致（归一化：dx² + dy² = speed²）
+        # ⭐ Lv.3 轻量化：惩罚从 0.707 → 0.80（更快斜向移动）
         if (move_left or move_right) and (move_up or move_down):
-            current_speed *= 0.707  # ≈ 1/√2
+            current_speed *= self._diagonal_penalty
 
         # ---- 计算移动增量 ----
         dx: int = 0
@@ -360,35 +413,49 @@ class Player(pygame.sprite.DirtySprite):
         """
         释放蓄力，按当前蓄力等级 + 道具 Buff 发射子弹（⭐ 增强版：不同蓄力等级不同子弹外观）。
         ————————————————————————————————
-        基础蓄力等级 → 发射数（子弹样式自动匹配）：
-          _charge_level < 40%  → 单发（蓝白能量尖晶 · single）
-          _charge_level 40-80% → 双发并排（金色双翼飞弹 · double）
-          _charge_level ≥ 80%  → 三发扇形（赤炎三叉戟 · triple）
+        基础蓄力等级 → 发射数：
+          _charge_level < 40%  → 单发
+          _charge_level 40-80% → 双发并排
+          _charge_level ≥ 80%  → 三发扇形
+          ⭐ ≥100% 二阶蓄力    → 四发 + 伤害×1.3
 
-        道具叠加效果：
-          DOUBLE_DAMAGE → 子弹伤害 ×2
-          TRIPLE_SPREAD → 始终三发起步，满蓄五发
-          PIERCE        → 子弹穿透敌人
-          RAPID_FIRE    → 蓄力加速（在 _update_charge 中处理）
-
-        返回值：
-            list[Bullet] — 子弹列表
+        ⭐ 保留机制：Lv.5 发射后保留部分蓄力
+        ⭐ 暴击机制：Lv.5 概率2倍伤害
         """
         charge: float = self._charge_level
-        self._charge_level = 0.0
+        # ⭐ Lv.5 蓄力保留：不重置为0，保留部分
+        if self._charge_retain > 0 and charge >= CHARGE_THRESHOLD_DOUBLE:
+            self._charge_level = self._charge_retain
+        else:
+            self._charge_level = 0.0
 
-        # ---- 道具修饰（可叠加：穿透 + 双倍 + 散射 可同时生效） ----
+        # ---- 道具修饰 + 阈值质变 ----
         active = self._active_powerups
-        pierce: bool = PowerUpType.PIERCE in active
+        pierce: bool = PowerUpType.PIERCE in active or self._pierce_shot  # ⭐ Lv.8
         dmg_mult: int = 2 if PowerUpType.DOUBLE_DAMAGE in active else 1
         is_spread: bool = PowerUpType.TRIPLE_SPREAD in active
 
         damage: int = (PLAYER_BULLET_DAMAGE + self._extra_damage) * dmg_mult
+
+        # ⭐ 二阶蓄力（charge >= 100%）：额外伤害加成
+        overcharge_bonus: float = 1.0
+        if charge >= 1.0 and self._overcharge_max > 1.0:
+            overcharge_bonus = 1.3
+        damage = int(damage * overcharge_bonus)
+
+        # ⭐ Lv.5 暴击
+        is_crit: bool = False
+        if self._crit_chance > 0 and random.random() < self._crit_chance + self._crit_chance_dynamic:
+            damage = int(damage * PLAYER_CRIT_DAMAGE_MULT)
+            is_crit = True
+
         base_x: float = float(self.rect.centerx)
         base_y: float = float(self.rect.top)
 
-        # 确定子弹样式（基于蓄力等级）
-        if charge >= CHARGE_THRESHOLD_TRIPLE:
+        # 确定子弹样式
+        if charge >= 1.0 and self._overcharge_max > 1.0:
+            bullet_style = "triple"  # 二阶蓄力用triple样式
+        elif charge >= CHARGE_THRESHOLD_TRIPLE:
             bullet_style = "triple"
         elif charge >= CHARGE_THRESHOLD_DOUBLE:
             bullet_style = "double"
@@ -398,22 +465,51 @@ class Player(pygame.sprite.DirtySprite):
         # 弹幕扩散加成（永久升级）
         spread_extra = self._spread_upgrade
 
+        # 暴击标记：子弹创建后改变颜色
+        crit_flag = is_crit
+
         def mkbullet(x, y, style=None):
-            return Bullet.create_player_bullet(
+            b = Bullet.create_player_bullet(
                 x=x, y=y, damage=damage, piercing=pierce,
                 style=style or bullet_style,
             )
+            # ⭐ Lv.3 锐利弹头：放大子弹
+            if self._bullet_size_bonus > 0:
+                b.image = pygame.transform.scale(
+                    b.image,
+                    (b.rect.width + self._bullet_size_bonus * 2,
+                     b.rect.height + self._bullet_size_bonus * 2)
+                )
+                b.rect = b.image.get_rect(center=b.rect.center)
+            # ⭐ Lv.5 暴击：子弹变金色
+            if crit_flag:
+                _tint_bullet_gold(b)
+            return b
+
+        # 二阶蓄力：四发以上（独立弹幕模式，不受扩散阈值影响）
+        if charge >= 1.0 and self._overcharge_max > 1.0:
+            base_count = 4 + spread_extra
+            return self._spread_bullets(base_count, base_x, base_y, mkbullet,
+                                        spacing=8, angle=20.0)
+
+        # ⭐ 常规射击：使用弹幕扩散阈值的间距和角度
+        spr_spacing = self._spread_spacing
+        spr_angle = self._spread_angle
 
         if is_spread:
             base_count = 5 if charge >= CHARGE_THRESHOLD_TRIPLE else 3
-            return self._spread_bullets(base_count + spread_extra, base_x, base_y, mkbullet)
+            return self._spread_bullets(base_count + spread_extra, base_x, base_y, mkbullet,
+                                        spacing=spr_spacing, angle=spr_angle)
 
         if charge < CHARGE_THRESHOLD_DOUBLE:
-            return self._spread_bullets(1 + spread_extra, base_x, base_y, mkbullet)
+            return self._spread_bullets(1 + spread_extra, base_x, base_y, mkbullet,
+                                        spacing=spr_spacing, angle=spr_angle)
         elif charge < CHARGE_THRESHOLD_TRIPLE:
-            return self._spread_bullets(2 + spread_extra, base_x, base_y, mkbullet)
+            return self._spread_bullets(2 + spread_extra, base_x, base_y, mkbullet,
+                                        spacing=spr_spacing, angle=spr_angle)
         else:
-            return self._spread_bullets(3 + spread_extra, base_x, base_y, mkbullet)
+            return self._spread_bullets(3 + spread_extra, base_x, base_y, mkbullet,
+                                        spacing=spr_spacing, angle=spr_angle)
 
     # ====================================================================
     # 蓄力进度条可视化（常驻显示，颜色分区指示等级）
@@ -427,6 +523,7 @@ class Player(pygame.sprite.DirtySprite):
           ████████░░░░░░░░░░░░  红区（0-40%）：单发
           ████████████████░░░░  黄区（40-80%）：双发
           ████████████████████  绿区（80-100%）：三发 → 闪烁提示
+          ⭐ 二阶蓄力（>100%）紫色脉冲
 
         位置：飞机 rect 上方 10 像素
         尺寸：宽度 = 飞机宽度，高度 = 5 像素
@@ -443,16 +540,21 @@ class Player(pygame.sprite.DirtySprite):
                          (bar_x - 1, bar_y - 1, bar_width + 2, bar_height + 2),
                          width=1)
 
-        # ---- 阀值分割线（半透明标记 40% 和 80% 分界） ----
+        # ---- 阈值分割线 ----
         line_double: int = bar_x + int(bar_width * CHARGE_THRESHOLD_DOUBLE)
         line_triple: int = bar_x + int(bar_width * CHARGE_THRESHOLD_TRIPLE)
         pygame.draw.line(screen, (100, 100, 100),
                          (line_double, bar_y), (line_double, bar_y + bar_height))
         pygame.draw.line(screen, (100, 100, 100),
                          (line_triple, bar_y), (line_triple, bar_y + bar_height))
+        # ⭐ 二阶蓄力分割线（100%）
+        if self._overcharge_max > 1.0:
+            line_full = bar_x + bar_width
+            pygame.draw.line(screen, (180, 100, 255),
+                             (line_full, bar_y), (line_full, bar_y + bar_height))
 
         # ---- 填充：按蓄力等级着色 ----
-        fill_width: int = int(bar_width * charge)
+        fill_width: int = int(bar_width * min(charge, 1.0))
         if fill_width <= 0:
             return
 
@@ -471,9 +573,20 @@ class Player(pygame.sprite.DirtySprite):
 
         pygame.draw.rect(screen, color, (bar_x, bar_y, fill_width, bar_height))
 
+        # ⭐ 二阶蓄力超充部分（>100%）
+        if charge > 1.0 and self._overcharge_max > 1.0:
+            over_width: int = int(bar_width * (charge - 1.0) / (self._overcharge_max - 1.0))
+            if over_width > 0:
+                over_color = (180, 80, 255) if int(time.time() * 6) % 2 == 0 else (220, 140, 255)
+                pygame.draw.rect(screen, over_color,
+                                 (bar_x + bar_width, bar_y, over_width, bar_height))
+
         # ---- 等级标签 ----
         font: pygame.font.Font = pygame.font.Font(UI_FONT_PATH, 14)
-        if charge >= CHARGE_THRESHOLD_TRIPLE:
+        if charge >= 1.0 and self._overcharge_max > 1.0:
+            label = "⚡超蓄"
+            label_color = (200, 120, 255)
+        elif charge >= CHARGE_THRESHOLD_TRIPLE:
             label: str = "三发"
             label_color: tuple = GREEN
         elif charge >= CHARGE_THRESHOLD_DOUBLE:
@@ -493,12 +606,14 @@ class Player(pygame.sprite.DirtySprite):
 
     @property
     def charge_level(self) -> float:
-        """当前蓄力值（0.0~1.0）"""
+        """当前蓄力值（0.0~_overcharge_max）"""
         return self._charge_level
 
     @property
     def charge_name(self) -> str:
         """当前蓄力等级名称"""
+        if self._charge_level >= 1.0 and self._overcharge_max > 1.0:
+            return "超蓄"
         if self._charge_level >= CHARGE_THRESHOLD_TRIPLE:
             return "三发"
         elif self._charge_level >= CHARGE_THRESHOLD_DOUBLE:
@@ -515,32 +630,51 @@ class Player(pygame.sprite.DirtySprite):
 
     def take_damage(self, amount: int) -> bool:
         """
-        受到伤害（⭐ 支持复活机制）。
+        受到伤害（⭐ 支持复活机制 + ⭐ 阈值质变）。
         ————————————————————————————————
-        检查无敌状态：无敌中则忽略伤害。
-        扣血后进入无敌状态（1.5秒），防止连续受伤。
-        如果 HP 归零且有额外命 → 消耗一命复活。
+        检查无敌状态：无敌中则忽略伤害（⭐ Lv.5 脉冲反击：发射反击弹）。
+        扣血后进入无敌状态，防止连续受伤（⭐ Lv.3 强化护盾延长无敌时间）。
+        如果 HP 归零且有额外命 → 消耗一命复活（⭐ Lv.8 凤凰涅槃延长复活无敌）。
+        如果 HP 归零且无额外命但有免死 → 消耗免死不扣命（Lv.8 不朽）。
 
         返回值：
-            bool — True 表示玩家死亡（hp ≤ 0 且无额外命）
+            bool — True 表示玩家死亡（hp ≤ 0 且无额外命无免死）
         """
         if self._invincible_timer > 0:
+            # ⭐ Lv.5 脉冲反击：无敌期间受伤→发射反击弹
+            if self._counter_shot:
+                self._trigger_counter_shot()
             return False  # 无敌中，忽略伤害
+
+        # ⭐ Lv.5 护甲：抵消部分伤害
+        if self._armor > 0:
+            amount = max(1, amount - self._armor)
 
         self.hp -= amount
         if self.hp <= 0:
+            # ⭐ Lv.8 不朽：消耗免死不消耗命
+            if self._immortality:
+                self._immortality = False
+                self.hp = 1
+                self._invincible_timer = self._invincible_duration
+                return False
             # ⭐ 复活：消耗一条命，恢复满血
             if self.extra_lives > 0:
                 self.extra_lives -= 1
                 self.hp = self.max_hp
-                self._invincible_timer = 2.0  # 复活后2秒无敌
+                # ⭐ Lv.8 凤凰涅槃：复活后更长的无敌时间
+                revive_time = self._revive_extra_time if self._revive_extra_time > 0 else 2.0
+                self._invincible_timer = revive_time
                 self._just_revived = True  # 标记供 Game 层处理特效
                 return False  # 没死，复活了
             self.hp = 0
             return True  # 真正死亡
 
-        # 进入无敌状态
-        self._invincible_timer = self._invincible_duration
+        # 进入无敌状态（⭐ Lv.3 强化护盾延长）
+        self._invincible_timer = self._invincible_duration + self._shield_bonus
+        # ⭐ Lv.5 受伤加速
+        if self._speed_boost_mult > 1.0:
+            self._speed_boost_timer = PLAYER_HURT_SPEED_DURATION
         return False
 
     def _update_invincible(self, dt: float) -> None:
@@ -550,20 +684,59 @@ class Player(pygame.sprite.DirtySprite):
             if self._invincible_timer < 0:
                 self._invincible_timer = 0.0
 
+    # ====================================================================
+    # ⭐ 阈值质变 — 每帧更新
+    # ====================================================================
+
+    def _update_regen(self, dt: float) -> None:
+        """❤️ Lv.3 细胞活化：每 N 秒自动恢复 1 HP。"""
+        if self._regen_interval <= 0 or self.hp >= self.max_hp:
+            self._regen_timer = 0.0
+            return
+        self._regen_timer += dt
+        if self._regen_timer >= self._regen_interval:
+            self._regen_timer -= self._regen_interval
+            self.hp = min(self.max_hp, self.hp + 1)
+
+    def _update_speed_boost(self, dt: float) -> None:
+        """💨 Lv.5 受伤加速：计时器递减。"""
+        if self._speed_boost_timer > 0:
+            self._speed_boost_timer -= dt
+            if self._speed_boost_timer < 0:
+                self._speed_boost_timer = 0.0
+
+    def _trigger_counter_shot(self) -> None:
+        """🛡️ Lv.5 脉冲反击：发射一枚反击弹追踪最近敌人。"""
+        # 创建一枚特殊子弹，由 Game 层添加到子弹组
+        from entities.bullet import Bullet
+        bullet = Bullet.create_player_bullet(
+            x=float(self.rect.centerx), y=float(self.rect.top),
+            damage=PLAYER_BULLET_DAMAGE + self._extra_damage,
+            piercing=False, style="counter",
+        )
+        self._pending_counter_shots.append(bullet)
+
     # ⭐ 自动连射
     def update_auto_fire(self, dt: float) -> list:
         """
         按住空格时的自动连射逻辑。
         每帧由 Game.update() 调用，返回本帧需要发射的子弹列表。
         连射使用最低蓄力等级（< 40%），不影响蓄力条显示。
+
+        ⭐ Lv.8 风行者：移动时连射间隔缩短。
         """
         if not self._is_firing:
             self._auto_fire_timer = 0.0
             return []
 
+        # ⭐ Lv.8 风行者：移动时射速提升
+        interval = self._auto_fire_interval
+        if self._move_fire_bonus < 1.0 and self._is_moving():
+            interval *= self._move_fire_bonus
+
         self._auto_fire_timer += dt
-        if self._auto_fire_timer >= self._auto_fire_interval:
-            self._auto_fire_timer -= self._auto_fire_interval
+        if self._auto_fire_timer >= interval:
+            self._auto_fire_timer -= interval
             # 自动连射 = 单发模式（使用当前蓄力但不超过单发阈值）
             charge = self._charge_level
             # 连射消耗蓄力：每次消耗 20% 蓄力
@@ -571,33 +744,78 @@ class Player(pygame.sprite.DirtySprite):
             return self._fire_auto(charge)
         return []
 
+    def _is_moving(self) -> bool:
+        """检测玩家当前是否在移动（用于风行者判定）。"""
+        keys = pygame.key.get_pressed()
+        return (keys[pygame.K_a] or keys[pygame.K_LEFT] or
+                keys[pygame.K_d] or keys[pygame.K_RIGHT] or
+                keys[pygame.K_w] or keys[pygame.K_UP] or
+                keys[pygame.K_s] or keys[pygame.K_DOWN])
+
     def _fire_auto(self, charge: float) -> list:
         """自动连射：发射基础子弹（蓄力低于 40% 的单发模式）"""
         active = self._active_powerups
-        pierce = PowerUpType.PIERCE in active
+        pierce = PowerUpType.PIERCE in active or self._pierce_shot  # ⭐ Lv.8
         dmg_mult = 2 if PowerUpType.DOUBLE_DAMAGE in active else 1
         is_spread = PowerUpType.TRIPLE_SPREAD in active
         damage = (PLAYER_BULLET_DAMAGE + self._extra_damage) * dmg_mult
+
+        # ⭐ Lv.5 暴击
+        is_crit: bool = False
+        if self._crit_chance > 0 and random.random() < self._crit_chance + self._crit_chance_dynamic:
+            damage = int(damage * PLAYER_CRIT_DAMAGE_MULT)
+            is_crit = True
+
         base_x = float(self.rect.centerx)
         base_y = float(self.rect.top)
         spread_extra = self._spread_upgrade
 
         def mk(x, y, style="single"):
-            return Bullet.create_player_bullet(x=x, y=y, damage=damage,
-                                              piercing=pierce, style=style)
+            b = Bullet.create_player_bullet(x=x, y=y, damage=damage,
+                                           piercing=pierce, style=style)
+            # ⭐ Lv.3 锐利弹头
+            if self._bullet_size_bonus > 0:
+                b.image = pygame.transform.scale(
+                    b.image,
+                    (b.rect.width + self._bullet_size_bonus * 2,
+                     b.rect.height + self._bullet_size_bonus * 2)
+                )
+                b.rect = b.image.get_rect(center=b.rect.center)
+            if is_crit:
+                _tint_bullet_gold(b)
+            return b
+
+        spr_spacing = self._spread_spacing
+        spr_angle = self._spread_angle
 
         if is_spread:
             total = 3 + spread_extra
-            return self._spread_bullets(total, base_x, base_y, mk)
+            return self._spread_bullets(total, base_x, base_y, mk,
+                                        spacing=spr_spacing, angle=spr_angle)
 
-        return self._spread_bullets(1 + spread_extra, base_x, base_y, mk)
+        return self._spread_bullets(1 + spread_extra, base_x, base_y, mk,
+                                    spacing=spr_spacing, angle=spr_angle)
 
     @staticmethod
-    def _spread_bullets(count, center_x, base_y_pos, factory):
-        """生成 count 枚水平扩散的子弹"""
+    def _spread_bullets(count, center_x, base_y_pos, factory,
+                        spacing: int = 7, angle: float = 0.0):
+        """
+        生成 count 枚水平扩散的子弹。
+        ⭐ angle > 0 时子弹呈扇形散射。
+        """
         if count <= 1:
             return [factory(center_x, base_y_pos)]
-        spacing = 7
+        if angle > 0:
+            # 扇形散射：中间密两边疏
+            radians = math.radians(angle)
+            bullets = []
+            for i in range(count):
+                t = -1.0 + 2.0 * i / (count - 1) if count > 1 else 0.0
+                offset_x = int(t * 12 * (1 + abs(t) * 0.5))
+                offset_y = int(abs(t) * 10)
+                bullets.append(factory(center_x + offset_x, base_y_pos + offset_y))
+            return bullets
+        # 水平扩散（原有逻辑）
         start = center_x - spacing * (count - 1) / 2.0
         bullets = []
         for i in range(count):

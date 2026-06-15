@@ -16,6 +16,7 @@
 """
 
 import random
+import math
 import pygame
 from settings import (
     SCREEN_WIDTH,
@@ -30,6 +31,7 @@ from settings import (
     SPAWN_INTERVAL_MIN,
     LEVEL_WAVES, WAVE_REST_DURATION, WAVE_ANNOUNCE_DURATION,
     FINAL_BOSS_LEVEL,
+    FormationType, FORMATION_DEFAULTS,
 )
 from sprites.enemy import NormalEnemy, FastEnemy, EliteEnemy, TrackingEnemy, BossEnemy
 
@@ -71,6 +73,7 @@ class Spawner:
 
         # 当前波次尚未生成的敌机队列（随机排列）
         self._spawn_queue: list[str] = []
+        self._spawn_positions: list[tuple[float, float]] = []  # ⭐ 阵型位置队列
         self._spawn_timer: float = 0.0
 
         # 波间休息
@@ -132,6 +135,7 @@ class Spawner:
         self._level = 1
         self._wave_index = 0
         self._spawn_queue.clear()
+        self._spawn_positions.clear()
         self._spawn_timer = 0.0
         self._rest_timer = 0.0
         self._is_resting = False
@@ -244,12 +248,16 @@ class Spawner:
             self._rest_timer = WAVE_REST_DURATION
             return new_boss
 
-        # ---- 生成敌机 ----
+        # ---- 生成敌机（⭐ 支持阵型位置） ----
         self._spawn_timer += dt
         if self._spawn_timer >= self._spawn_interval and self._spawn_queue:
             self._spawn_timer -= self._spawn_interval
             etype = self._spawn_queue.pop(0)
-            enemy = self._make_enemy(etype)
+            # 取阵型位置（如果有的话）
+            pos_x = pos_y = None
+            if self._spawn_positions:
+                pos_x, pos_y = self._spawn_positions.pop(0)
+            enemy = self._make_enemy(etype, pos_x, pos_y)
             if enemy is not None:
                 enemy_group.add(enemy)
                 all_sprites.add(enemy)
@@ -263,20 +271,152 @@ class Spawner:
     # ================================================================
 
     def _build_spawn_queue(self) -> None:
-        """生成当前波次的敌机队列（随机排列）。"""
+        """生成当前波次的敌机队列（支持阵型）。"""
         if self._wave_index >= len(self._wave_config):
             self._spawn_queue = []
+            self._spawn_positions = []
             return
         wave = self._wave_config[self._wave_index]
-        queue: list[str] = []
-        for etype, count in wave:
-            queue.extend([etype] * count)
-        random.shuffle(queue)
-        self._spawn_queue = queue
+
+        # 检测新旧格式
+        if isinstance(wave, dict):
+            units = wave.get("units", [])
+            formation_name = wave.get("formation", "none")
+            params = wave.get("params", {})
+        else:
+            units = wave
+            formation_name = "none"
+            params = {}
+
+        # 展开成平铺列表
+        flat: list[str] = []
+        for etype, count in units:
+            flat.extend([etype] * count)
+
+        if formation_name == "none" or formation_name not in FORMATION_DEFAULTS:
+            # 无阵型：随机排列，随机位置（原有行为）
+            random.shuffle(flat)
+            self._spawn_queue = flat
+            self._spawn_positions = []
+        else:
+            # 有阵型：计算位置，保持顺序（先出先入阵）
+            merged = {**FORMATION_DEFAULTS[formation_name], **params}
+            positions = self._compute_formation_positions(
+                formation_name, len(flat), merged
+            )
+            self._spawn_queue = flat
+            self._spawn_positions = positions
+
         self._spawn_timer = 0.0
 
-    def _make_enemy(self, etype: str):
-        """按类型和难度缩放生成敌机（⭐ 非线性难度）。"""
+    # ================================================================
+    # ⭐ 阵型位置计算
+    # ================================================================
+
+    def _compute_formation_positions(
+        self, formation: str, count: int, params: dict,
+    ) -> list[tuple[float, float]]:
+        """
+        根据阵型类型和参数计算每个敌机的生成位置。
+        返回 [(x, y), ...] 列表，顺序与 _spawn_queue 对应。
+        """
+        sw = SCREEN_WIDTH
+        spacing = params.get("spacing", 40)
+        width = params.get("width", min(300, sw - 80))
+        entry_y = params.get("entry_y", -60)
+        cx = sw / 2
+        cy = entry_y
+
+        if count == 0:
+            return []
+        if count == 1:
+            return [(cx, cy)]
+
+        positions: list[tuple[float, float]] = []
+
+        if formation == "line":
+            # 一字横排：均匀分布
+            start_x = cx - width / 2
+            for i in range(count):
+                x = start_x + i * (width / (count - 1))
+                positions.append((x, cy + (i % 2) * 8))  # 微微交错
+
+        elif formation == "vshape":
+            # V字楔形：中间低，两边高
+            for i in range(count):
+                t = -1.0 + 2.0 * i / (count - 1) if count > 1 else 0.0
+                x = cx + t * width / 2
+                y = cy + abs(t) * spacing * 0.8
+                positions.append((x, y))
+
+        elif formation == "triangle":
+            # 三角形：多行，每行递增
+            row = 0
+            placed = 0
+            while placed < count:
+                in_this_row = min(row + 1, count - placed)
+                row_width = (in_this_row - 1) * spacing
+                start_x = cx - row_width / 2
+                for i in range(in_this_row):
+                    if placed < count:
+                        x = start_x + i * spacing
+                        y = cy + row * spacing * 0.7
+                        positions.append((x, y))
+                        placed += 1
+                row += 1
+
+        elif formation == "arc":
+            # 弧线：在圆弧上均匀分布
+            radius = width / 2
+            angle_range = math.radians(params.get("angle", 60))
+            start_angle = math.pi - angle_range / 2
+            for i in range(count):
+                a = start_angle + i * (angle_range / (count - 1))
+                x = cx + radius * math.cos(a)
+                y = cy + radius * math.sin(a) * 0.5
+                positions.append((x, y))
+
+        elif formation == "cross":
+            # X形交叉：两条对角线
+            half = count // 2
+            for i in range(count):
+                if i < half:
+                    t = -1.0 + 2.0 * i / (half - 1) if half > 1 else 0.0
+                    x = cx + t * width / 2
+                    y = cy + abs(t) * spacing * 0.6
+                else:
+                    idx = i - half
+                    t = -1.0 + 2.0 * idx / (count - half - 1) if (count - half) > 1 else 0.0
+                    x = cx + t * width / 2
+                    y = cy + (1.0 - abs(t)) * spacing * 0.8
+                    # 水平偏移微调让两条线错开
+                    x += spacing * 0.15 * (-1 if idx % 2 == 0 else 1)
+                positions.append((x, y))
+
+        elif formation == "surround":
+            # 包围：左右两侧各一半，呈包围状
+            half = count // 2
+            for i in range(count):
+                if i < half:
+                    # 左侧: 从左上到中下
+                    t = i / max(half - 1, 1)
+                    x = 20 + t * (cx - 40)
+                    y = cy + t * spacing * 0.5
+                else:
+                    # 右侧: 从右上到中下
+                    t = (i - half) / max(count - half - 1, 1)
+                    x = sw - 20 - t * (sw - cx - 40)
+                    y = cy + t * spacing * 0.5
+                positions.append((x, y))
+
+        # 保底：确保所有位置都在屏幕范围内
+        for i, (px, py) in enumerate(positions):
+            positions[i] = (max(5, min(sw - 5, px)), py)
+
+        return positions
+
+    def _make_enemy(self, etype: str, pos_x: float | None = None, pos_y: float | None = None):
+        """按类型和难度缩放生成敌机（⭐ 支持指定位置）。"""
         # 非线性难度：前期平缓，后期陡升
         effective_level = self._level ** DIFFICULTY_NONLINEAR_EXP
         speed_scale = DIFFICULTY_SPEED_SCALE ** (effective_level - 1)
@@ -285,15 +425,18 @@ class Spawner:
 
         try:
             if etype == "normal":
-                e = NormalEnemy(fire_interval=ENEMY_NORMAL_FIRE_INTERVAL * fire_scale)
+                e = NormalEnemy(x=pos_x, y=pos_y,
+                                fire_interval=ENEMY_NORMAL_FIRE_INTERVAL * fire_scale)
             elif etype == "fast":
-                e = FastEnemy(fire_interval=ENEMY_FAST_FIRE_INTERVAL * fire_scale)
+                e = FastEnemy(x=pos_x, y=pos_y,
+                              fire_interval=ENEMY_FAST_FIRE_INTERVAL * fire_scale)
             elif etype == "elite":
-                e = EliteEnemy(fire_interval=ENEMY_ELITE_FIRE_INTERVAL * fire_scale)
+                e = EliteEnemy(x=pos_x, y=pos_y,
+                               fire_interval=ENEMY_ELITE_FIRE_INTERVAL * fire_scale)
                 if self._player is not None:
                     e.set_player(self._player)
             elif etype == "tracking":
-                e = TrackingEnemy(self._player,
+                e = TrackingEnemy(self._player, x=pos_x, y=pos_y,
                                   fire_interval=ENEMY_TRACKING_FIRE_INTERVAL * fire_scale)
             else:
                 return None

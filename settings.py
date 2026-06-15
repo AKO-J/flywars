@@ -35,6 +35,16 @@ class PowerUpType(Enum):
     PIERCE = auto()          # 穿透弹（持续8秒）
     RAPID_FIRE = auto()      # 快速蓄力（持续8秒）
 
+class FormationType(Enum):
+    """敌机编队阵型枚举"""
+    NONE = auto()      # 无阵型，随机位置（原有行为）
+    LINE = auto()      # 一字横排
+    VSHAPE = auto()    # V字楔形
+    TRIANGLE = auto()  # 正三角/倒三角
+    ARC = auto()       # 弧线排列
+    CROSS = auto()     # X形交叉
+    SURROUND = auto()  # 两侧包围
+
 # ---------------------- 帧率设置 ---------------------- #
 # 目标帧率：每秒刷新60次，保证动画流畅
 FPS: int = 60
@@ -90,9 +100,9 @@ BACKGROUND_BASE_SPEED: float = 80.0
 # 视差层配置：[ (星星数量, 最小尺寸, 最大尺寸, 速度系数, 最小亮度, 最大亮度), ... ]
 # 速度系数：1.0 = 基准速度，越小越慢（远层），越大越快（近层）
 BACKGROUND_LAYERS: list[tuple[int, int, int, float, int, int]] = [
-    (40, 1, 1, 0.3, 60, 120),    # 远层：小、慢、暗
-    (25, 1, 2, 0.6, 100, 170),   # 中层：中、中速、中亮
-    (15, 2, 3, 1.0, 150, 255),   # 近层：大、快、亮
+    (60, 1, 1, 0.3, 60, 120),    # 原(40) → 远层：更多小星
+    (35, 1, 2, 0.6, 100, 170),   # 原(25) → 中层
+    (20, 2, 4, 1.0, 150, 255),   # 原(15) → 近层：大星含彩色
 ]
 
 # ---------------------- 子弹设置 ---------------------- #
@@ -232,97 +242,138 @@ SPAWN_INTERVAL_MIN: float = 0.15                # 原0.20 → 更密集
 from typing import Literal
 EnemyWaveType = Literal["normal", "fast", "elite", "tracking"]
 
-# 波次结构：[(type, count), ...]
+# ⭐ 编队阵型默认参数
+FORMATION_DEFAULTS: dict[str, dict] = {
+    "line": {
+        "spacing": 45,
+        "width": 320,
+        "entry_y": -60,
+        "angle": 0,
+    },
+    "vshape": {
+        "spacing": 40,
+        "width": 280,
+        "entry_y": -60,
+        "angle": 25,
+    },
+    "triangle": {
+        "spacing": 38,
+        "width": 260,
+        "entry_y": -80,
+        "angle": 0,
+    },
+    "arc": {
+        "spacing": 35,
+        "width": 300,
+        "entry_y": -40,
+        "angle": 60,
+    },
+    "cross": {
+        "spacing": 40,
+        "width": 280,
+        "entry_y": -60,
+        "angle": 30,
+    },
+    "surround": {
+        "spacing": 45,
+        "width": 360,
+        "entry_y": -40,
+        "angle": 20,
+    },
+}
+
+# 波次结构：每个波次可以是 [(type, count), ...]（旧格式，随机位置）
+# 或 {"units": [(type, count), ...], "formation": "...", "params": {...}}
 LEVEL_WAVES: dict[int, dict] = {
-    1: {  # 入门关
+    1: {  # 入门关 — 横排入门
         "waves": [
-            [("normal", 3)],
-            [("normal", 4)],
-            [("normal", 3), ("fast", 1)],
+            {"units": [("normal", 3)], "formation": "line"},
+            {"units": [("normal", 4)], "formation": "line"},
+            {"units": [("normal", 3), ("fast", 1)], "formation": "vshape"},
         ],
         "spawn_interval": 0.9,
         "has_boss": False,
     },
-    2: {  # 引入快速敌机
+    2: {  # 引入快速敌机 — 三角+V形
         "waves": [
-            [("normal", 4)],
-            [("normal", 3), ("fast", 2)],
-            [("normal", 4), ("fast", 2)],
+            {"units": [("normal", 4)], "formation": "line"},
+            {"units": [("normal", 3), ("fast", 2)], "formation": "triangle"},
+            {"units": [("normal", 4), ("fast", 2)], "formation": "vshape"},
         ],
         "spawn_interval": 0.8,
         "has_boss": False,
     },
-    3: {  # 引入精英敌机（无Boss，积累期）
+    3: {  # 引入精英敌机
         "waves": [
-            [("normal", 4), ("fast", 1)],
-            [("normal", 3), ("elite", 1)],
-            [("normal", 4), ("fast", 3)],
-            [("normal", 5), ("fast", 2), ("elite", 1)],
+            {"units": [("normal", 4), ("fast", 1)], "formation": "line"},
+            {"units": [("normal", 3), ("elite", 1)], "formation": "triangle"},
+            {"units": [("normal", 4), ("fast", 3)], "formation": "vshape"},
+            {"units": [("normal", 5), ("fast", 2), ("elite", 1)], "formation": "cross"},
         ],
         "spawn_interval": 0.7,
         "has_boss": False,
     },
-    4: {  # 引入追踪敌机（无Boss，积累期）
+    4: {  # 引入追踪敌机
         "waves": [
-            [("normal", 4), ("fast", 2)],
-            [("normal", 3), ("fast", 2), ("tracking", 1)],
-            [("normal", 4), ("fast", 3), ("elite", 1)],
-            [("normal", 5), ("fast", 3), ("tracking", 1)],
+            {"units": [("normal", 4), ("fast", 2)], "formation": "line"},
+            {"units": [("normal", 3), ("fast", 2), ("tracking", 1)], "formation": "vshape"},
+            {"units": [("normal", 4), ("fast", 3), ("elite", 1)], "formation": "arc"},
+            {"units": [("normal", 5), ("fast", 3), ("tracking", 1)], "formation": "cross"},
         ],
         "spawn_interval": 0.65,
         "has_boss": False,
     },
     5: {  # ⭐ 首个 Boss 战
         "waves": [
-            [("normal", 5), ("fast", 2)],
-            [("normal", 3), ("fast", 3), ("elite", 1)],
-            [("normal", 4), ("fast", 3), ("elite", 2)],
-            [("normal", 6), ("fast", 3), ("tracking", 1)],
+            {"units": [("normal", 5), ("fast", 2)], "formation": "line"},
+            {"units": [("normal", 3), ("fast", 3), ("elite", 1)], "formation": "vshape"},
+            {"units": [("normal", 4), ("fast", 3), ("elite", 2)], "formation": "triangle"},
+            {"units": [("normal", 6), ("fast", 3), ("tracking", 1)], "formation": "surround"},
         ],
         "spawn_interval": 0.6,
         "has_boss": True,
     },
-    6: {  # 战间期（无Boss，混合编队）
+    6: {  # 战间期 — 混合编队
         "waves": [
-            [("normal", 4), ("fast", 3), ("tracking", 1)],
-            [("normal", 3), ("fast", 2), ("elite", 2)],
-            [("normal", 4), ("fast", 3), ("elite", 2)],
-            [("normal", 5), ("fast", 3), ("tracking", 2)],
-            [("normal", 6), ("fast", 4), ("elite", 1), ("tracking", 1)],
+            {"units": [("normal", 4), ("fast", 3), ("tracking", 1)], "formation": "vshape"},
+            {"units": [("normal", 3), ("fast", 2), ("elite", 2)], "formation": "cross"},
+            {"units": [("normal", 4), ("fast", 3), ("elite", 2)], "formation": "triangle"},
+            {"units": [("normal", 5), ("fast", 3), ("tracking", 2)], "formation": "arc"},
+            {"units": [("normal", 6), ("fast", 4), ("elite", 1), ("tracking", 1)], "formation": "surround"},
         ],
         "spawn_interval": 0.55,
         "has_boss": False,
     },
-    7: {  # 高密度（无Boss）
+    7: {  # 高密度 — 全阵型展示
         "waves": [
-            [("normal", 6), ("fast", 3), ("tracking", 1)],
-            [("normal", 5), ("fast", 4), ("elite", 2)],
-            [("normal", 6), ("fast", 3), ("tracking", 2)],
-            [("normal", 5), ("fast", 4), ("elite", 2), ("tracking", 2)],
-            [("normal", 8), ("fast", 5), ("elite", 2)],
+            {"units": [("normal", 6), ("fast", 3), ("tracking", 1)], "formation": "line"},
+            {"units": [("normal", 5), ("fast", 4), ("elite", 2)], "formation": "vshape"},
+            {"units": [("normal", 6), ("fast", 3), ("tracking", 2)], "formation": "triangle"},
+            {"units": [("normal", 5), ("fast", 4), ("elite", 2), ("tracking", 2)], "formation": "cross"},
+            {"units": [("normal", 8), ("fast", 5), ("elite", 2)], "formation": "surround"},
         ],
         "spawn_interval": 0.5,
         "has_boss": False,
     },
-    8: {  # 最终关前哨（无Boss）
+    8: {  # 最终关前哨
         "waves": [
-            [("normal", 6), ("fast", 4), ("tracking", 2)],
-            [("normal", 5), ("fast", 4), ("elite", 3)],
-            [("normal", 6), ("fast", 5), ("tracking", 3)],
-            [("normal", 8), ("fast", 4), ("elite", 3), ("tracking", 2)],
-            [("normal", 10), ("fast", 5), ("elite", 3), ("tracking", 2)],
+            {"units": [("normal", 6), ("fast", 4), ("tracking", 2)], "formation": "vshape"},
+            {"units": [("normal", 5), ("fast", 4), ("elite", 3)], "formation": "cross"},
+            {"units": [("normal", 6), ("fast", 5), ("tracking", 3)], "formation": "triangle"},
+            {"units": [("normal", 8), ("fast", 4), ("elite", 3), ("tracking", 2)], "formation": "arc"},
+            {"units": [("normal", 10), ("fast", 5), ("elite", 3), ("tracking", 2)], "formation": "surround"},
         ],
         "spawn_interval": 0.45,
         "has_boss": False,
     },
     9: {  # ⭐ 最终 Boss 战
         "waves": [
-            [("normal", 8), ("fast", 5), ("tracking", 2)],
-            [("normal", 6), ("fast", 5), ("elite", 3), ("tracking", 2)],
-            [("normal", 10), ("fast", 4), ("elite", 3)],
-            [("normal", 8), ("fast", 5), ("tracking", 3), ("elite", 2)],
-            [("normal", 10), ("fast", 6), ("elite", 4), ("tracking", 3)],
-            [("normal", 8), ("fast", 6), ("elite", 4), ("tracking", 3)],
+            {"units": [("normal", 8), ("fast", 5), ("tracking", 2)], "formation": "vshape"},
+            {"units": [("normal", 6), ("fast", 5), ("elite", 3), ("tracking", 2)], "formation": "cross"},
+            {"units": [("normal", 10), ("fast", 4), ("elite", 3)], "formation": "triangle"},
+            {"units": [("normal", 8), ("fast", 5), ("tracking", 3), ("elite", 2)], "formation": "arc"},
+            {"units": [("normal", 10), ("fast", 6), ("elite", 4), ("tracking", 3)], "formation": "surround"},
+            {"units": [("normal", 8), ("fast", 6), ("elite", 4), ("tracking", 3)], "formation": "cross"},
         ],
         "spawn_interval": 0.4,
         "has_boss": True,
@@ -383,6 +434,33 @@ XP_LEVEL_MAX: int = 99         # 最高等级
 # 强化类型
 UPGRADE_MAX_LEVEL: int = 8                # 每项强化最高等级（原5）
 UPGRADE_POINTS_PER_LEVEL: int = 1         # 每升1级获得点数
+
+# ⭐ 阈值质变 — 各属性在特定等级解锁特效
+# ❤️ 生命强化
+PLAYER_HP_REGEN_INTERVAL: float = 10.0    # Lv.3: 自动回血间隔（秒）
+PLAYER_ARMOR_DAMAGE_REDUCTION: int = 1    # Lv.5: 每次受伤抵消伤害
+PLAYER_IMMORTAL_ONCE: bool = True         # Lv.8: 每局一次免死
+# ⚡ 火力提升
+PLAYER_CRIT_CHANCE: float = 0.10          # Lv.5: 暴击率
+PLAYER_CRIT_DAMAGE_MULT: float = 2.0      # Lv.5: 暴击伤害倍率
+PLAYER_BULLET_SIZE_BONUS: int = 2         # Lv.3: 子弹尺寸增大（px）
+PLAYER_PIERCE_SHOT: bool = True           # Lv.8: 穿透弹
+# 🔥 蓄力加速
+PLAYER_OVERCHARGE_THRESHOLD: float = 1.50 # Lv.3: 二阶蓄力上限（150%）
+PLAYER_CHARGE_RETAIN: float = 0.40        # Lv.5: 发射后保留蓄力比例
+PLAYER_TURBO_CHARGE_MULT: float = 0.70    # Lv.8: 涡轮充能倍率
+# 💨 机动增强
+PLAYER_DIAGONAL_PENALTY_UPGRADE: float = 0.80  # Lv.3: 斜向惩罚（原0.707）
+PLAYER_HURT_SPEED_BOOST: float = 1.40     # Lv.5: 受伤加速倍率
+PLAYER_HURT_SPEED_DURATION: float = 2.0   # Lv.5: 受伤加速持续（秒）
+PLAYER_MOVE_FIRE_BONUS: float = 0.80      # Lv.8: 移动时连射间隔系数（越小越快）
+# 🌊 弹幕扩散
+PLAYER_SPREAD_SPACING_UPGRADE: int = 10   # Lv.2: 扩散子弹间距（px）
+PLAYER_SPREAD_ANGLE: float = 30.0         # Lv.3: 扇形散射覆盖角（度）
+# 🛡️ 护盾精通
+PLAYER_SHIELD_BONUS_TIME: float = 0.5     # Lv.3: 无敌时间额外增加
+PLAYER_COUNTER_SHOT: bool = True          # Lv.5: 无敌期间受伤反击
+PLAYER_REVIVE_EXTRA_TIME: float = 3.0     # Lv.8: 复活后无敌时间
 # 道具主题色（程序化渲染用）
 POWERUP_COLORS: dict = {
     PowerUpType.HEALTH: (0, 230, 60),

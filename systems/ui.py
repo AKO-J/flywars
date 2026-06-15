@@ -413,21 +413,43 @@ class UISystem:
 
     def _draw_combo(self, screen: pygame.Surface, combo_text: str,
                     combo_count: int, combo_multiplier: int) -> None:
-        """在屏幕右侧绘制连击计数器。"""
+        """在屏幕右侧绘制连击计数器（⭐ 里程碑着色）。"""
         if combo_count < 2:
             return
         sw = SCREEN_WIDTH
         font_large = get_font(28)
         font_small = get_font(14)
 
+        # ⭐ 根据连击数选择颜色层级
+        if combo_count >= 50:
+            primary = (255, 80, 255)    # 紫色 — 传说
+            glow_clr = (200, 0, 200)
+            tier_label = "传说"
+        elif combo_count >= 30:
+            primary = (255, 50, 50)     # 红色 — 史诗
+            glow_clr = (200, 0, 0)
+            tier_label = "史诗"
+        elif combo_count >= 15:
+            primary = (255, 200, 50)    # 金色 — 稀有
+            glow_clr = (200, 150, 0)
+            tier_label = "稀有"
+        elif combo_count >= 5:
+            primary = (100, 255, 100)   # 绿色 — 进阶
+            glow_clr = (0, 200, 0)
+            tier_label = "进阶"
+        else:
+            primary = (200, 200, 200)   # 白色 — 基础
+            glow_clr = (150, 150, 150)
+            tier_label = ""
+
         # 连击数字（大号，右侧纵向）
         count_str = str(combo_count)
-        count_surf = font_large.render(count_str, True, (255, 200, 50))
+        count_surf = font_large.render(count_str, True, primary)
         count_x = sw - count_surf.get_width() - 15
         count_y = 55
 
         # 发光效果
-        glow_surf = font_large.render(count_str, True, (255, 150, 0))
+        glow_surf = font_large.render(count_str, True, glow_clr)
         glow_surf.set_alpha(60)
         screen.blit(glow_surf, (count_x + 2, count_y + 2))
 
@@ -435,9 +457,15 @@ class UISystem:
 
         # 倍率标签
         mult_text = f"COMBO x{combo_multiplier}"
-        mult_surf = font_small.render(mult_text, True, (255, 200, 100))
+        mult_surf = font_small.render(mult_text, True, primary)
         mult_x = sw - mult_surf.get_width() - 15
         screen.blit(mult_surf, (mult_x, count_y + count_surf.get_height() - 4))
+
+        # ⭐ 层级标签
+        if tier_label:
+            tier_surf = font_small.render(tier_label, True, glow_clr)
+            tier_x = sw - tier_surf.get_width() - 15
+            screen.blit(tier_surf, (tier_x, count_y + count_surf.get_height() + 14))
 
     def _draw_floating_texts(self, screen: pygame.Surface) -> None:
         """绘制所有飘字得分（叠加在游戏画面上层）。"""

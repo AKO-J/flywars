@@ -16,29 +16,52 @@ from settings import (
 
 
 class Star:
-    __slots__ = ("x", "y", "size", "speed", "color")
+    __slots__ = ("x", "y", "size", "speed", "color", "_base_color", "_phase", "_twinkle_speed")
 
     def __init__(self, x, y, size, speed, brightness, color=(0, 0, 0)):
         self.x, self.y = x, y
         self.size, self.speed = size, speed
         self.color = color if color != (0, 0, 0) else (brightness,) * 3
+        self._base_color = self.color
+        self._phase = random.uniform(0, math.pi * 2)  # 闪烁相位
+        self._twinkle_speed = random.uniform(1.5, 4.0)  # 闪烁速度
 
     def update(self, dt):
         self.y += self.speed * dt
         if self.y > SCREEN_HEIGHT + self.size:
             self.y = -self.size
             self.x = random.uniform(0, SCREEN_WIDTH)
+            # 重置时随机颜色（部分星星带色调）
+            if random.random() < 0.15:
+                hue = random.choice([
+                    (180, 200, 255),  # 蓝白
+                    (255, 200, 180),  # 橙黄
+                    (200, 180, 255),  # 紫
+                    (255, 180, 180),  # 红
+                ])
+                self._base_color = hue
+            else:
+                b = random.randint(100, 255)
+                self._base_color = (b, b, b)
 
     def draw(self, screen):
+        # 闪烁：大星星明显，小星星轻微
+        if self.size >= 2:
+            twinkle = 0.7 + 0.3 * math.sin(self._phase + pygame.time.get_ticks() * 0.001 * self._twinkle_speed)
+            self.color = tuple(min(255, int(c * twinkle)) for c in self._base_color)
+        else:
+            self.color = self._base_color
+
         if self.size <= 1:
             screen.set_at((int(self.x), int(self.y)), self.color)
         else:
             pygame.draw.circle(screen, self.color, (int(self.x), int(self.y)), self.size)
             # ⭐ 大星星加柔光
-            if self.size >= 4:
-                glow = pygame.Surface((self.size * 4, self.size * 4), pygame.SRCALPHA)
+            if self.size >= 3:
+                glow_size = self.size * 4
+                glow = pygame.Surface((glow_size, glow_size), pygame.SRCALPHA)
                 for i in range(self.size * 2, 0, -1):
-                    a = max(1, 20 - i)
+                    a = max(1, int(18 - i * 1.5))
                     r2 = i // 2
                     if r2 > 0:
                         pygame.draw.circle(glow, (*self.color[:3], a),
@@ -312,37 +335,37 @@ class BackgroundTheme:
 THEME_STARFIELD = BackgroundTheme(
     name="星空",
     layer_configs=[
-        (40, 1, 2, 0.3, 60, 120, (180, 200, 255)),
-        (25, 2, 4, 0.6, 100, 170, (200, 220, 255)),
-        (15, 3, 6, 1.0, 150, 255, (255, 255, 255)),
+        (60, 1, 2, 0.3, 60, 120, (180, 200, 255)),   # 原40→60
+        (35, 2, 4, 0.6, 100, 170, (200, 220, 255)),   # 原25→35
+        (20, 3, 6, 1.0, 150, 255, (255, 255, 255)),   # 原15→20
     ],
     overlay_color=(0, 0, 20), overlay_alpha=12,
     accent_color=(100, 180, 255),
-    nebula_count=2, celestial_chance=0.4,
+    nebula_count=3, celestial_chance=0.5,  # 原2→3
 )
 
 THEME_NEBULA = BackgroundTheme(
     name="星云",
     layer_configs=[
-        (50, 1, 3, 0.3, 40, 100, (200, 150, 255)),
-        (30, 2, 5, 0.6, 60, 140, (255, 200, 150)),
-        (20, 3, 7, 1.0, 100, 200, (255, 180, 100)),
+        (70, 1, 3, 0.3, 40, 100, (200, 150, 255)),   # 原50→70
+        (40, 2, 5, 0.6, 60, 140, (255, 200, 150)),   # 原30→40
+        (25, 3, 7, 1.0, 100, 200, (255, 180, 100)),  # 原20→25
     ],
     overlay_color=(30, 10, 40), overlay_alpha=20,
     accent_color=(200, 150, 255),
-    nebula_count=4, celestial_chance=0.7,
+    nebula_count=5, celestial_chance=0.8,  # 原4→5
 )
 
 THEME_RED_ALERT = BackgroundTheme(
     name="警戒",
     layer_configs=[
-        (30, 1, 2, 0.3, 40, 80, (180, 60, 60)),
-        (20, 2, 4, 0.6, 60, 120, (220, 80, 80)),
-        (10, 3, 6, 1.0, 80, 180, (255, 100, 50)),
+        (50, 1, 2, 0.3, 40, 80, (180, 60, 60)),     # 原30→50
+        (30, 2, 4, 0.6, 60, 120, (220, 80, 80)),    # 原20→30
+        (15, 3, 6, 1.0, 80, 180, (255, 100, 50)),   # 原10→15
     ],
     overlay_color=(40, 0, 0), overlay_alpha=25,
     accent_color=(255, 80, 80),
-    nebula_count=5, celestial_chance=0.2,
+    nebula_count=6, celestial_chance=0.3,  # 原5→6
 )
 
 LEVEL_THEMES = [

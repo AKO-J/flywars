@@ -1071,6 +1071,12 @@ class Game:
             self.bullets, self.enemies, self.player,
             dt=self.dt if self.dt > 0 else 1.0 / 60.0,
         )
+        # ⭐ 处理脉冲反击弹
+        if self.player._pending_counter_shots:
+            for b in self.player._pending_counter_shots:
+                self.all_sprites.add(b)
+                self.bullets.add(b)
+            self.player._pending_counter_shots.clear()
         # ── 网络同步：击杀敌人时通知服务器加分 ──
         if self.network.is_connected and self._my_room and self.collision.kills_this_frame > 0:
             for _ in range(self.collision.kills_this_frame):
@@ -1155,6 +1161,36 @@ class Game:
                                  count=8, speed=100, gravity=0, lifetime=0.6,
                                  colors=[(255, 80, 80), (255, 150, 50)],
                                  size_range=(3, 6), spread=2 * math.pi)
+            # ⭐ 断连文字
+            self.ui.add_pickup_text(sw // 2, SCREEN_HEIGHT // 2 - 50,
+                                    f"💔 Combo x{self.collision.combo_peak} 断连！", (255, 80, 80))
+
+        # ⭐ 连击里程碑：30连击回血
+        if self.collision.combo_milestone_heal:
+            self.player.hp = min(self.player.max_hp, self.player.hp + 1)
+            self.particles.burst(self.player.rect.centerx, self.player.rect.centery,
+                                 count=12, speed=80, gravity=-20, lifetime=0.8,
+                                 colors=[(0, 255, 100), (100, 255, 200)],
+                                 size_range=(3, 7), spread=2 * math.pi)
+            self.ui.add_pickup_text(self.player.rect.centerx, self.player.rect.top - 20,
+                                    "❤️ 30连击 回血!", (0, 255, 100))
+
+        # ⭐ 连击里程碑：50连击掉落道具
+        if self.collision.combo_milestone_drop:
+            import random
+            ptype = random.choice(list(PowerUpType))
+            pu = PowerUp(self.player.rect.centerx, self.player.rect.top - 20, ptype)
+            self.powerups.add(pu)
+            self.all_sprites.add(pu)
+            self.particles.burst(self.player.rect.centerx, self.player.rect.centery,
+                                 count=16, speed=120, gravity=-30, lifetime=1.0,
+                                 colors=[(255, 215, 0), (255, 255, 100)],
+                                 size_range=(4, 8), spread=2 * math.pi)
+            self.ui.add_pickup_text(self.player.rect.centerx, self.player.rect.top - 40,
+                                    "🎁 50连击 道具奖励!", (255, 215, 0))
+
+        # ⭐ 连击暴击加成（>=15连击 额外+10%暴击）
+        self.player._crit_chance_dynamic = 0.10 if self.collision.combo_count >= 15 else 0.0
 
         # ---- 道具掉落生成（题18） ----
         for dx, dy, ptype in self.collision.drops:

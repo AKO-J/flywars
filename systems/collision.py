@@ -76,6 +76,13 @@ class CollisionSystem:
         self.combo_multiplier: int = 1      # 当前倍率
         self.combo_peak: int = 0            # 本局最高连击
         self.combo_just_broke: bool = False  # 本帧刚断连
+        # ⭐ 连击里程碑（本帧触发）
+        self.combo_milestone_heal: bool = False    # 30连击：回血
+        self.combo_milestone_drop: bool = False    # 50连击：掉落道具
+        self._last_milestone_heal: int = 0         # 上次回血时的连击阈值
+        self._last_milestone_drop: int = 0         # 上次掉落时的连击阈值
+        # ⭐ 连击经验倍率（>=5连击时生效）
+        self.combo_xp_mult: float = 1.0
 
     # ================================================================
     # 公共入口
@@ -102,6 +109,9 @@ class CollisionSystem:
         self.kills_this_frame = 0
         self.hit_sparks.clear()
         self.combo_bonus_texts.clear()
+        # ⭐ 重置连击里程碑标记
+        self.combo_milestone_heal = False
+        self.combo_milestone_drop = False
 
         # ⭐ 更新 combo 计时器
         self._update_combo(dt)
@@ -145,6 +155,11 @@ class CollisionSystem:
         self.combo_multiplier = 1
         self.combo_peak = 0
         self.combo_just_broke = False
+        self.combo_milestone_heal = False
+        self.combo_milestone_drop = False
+        self._last_milestone_heal = 0
+        self._last_milestone_drop = 0
+        self.combo_xp_mult = 1.0
 
     def reset(self) -> None:
         self.score = 0
@@ -278,14 +293,27 @@ class CollisionSystem:
             self.combo_multiplier = 1
         self.combo_peak = max(self.combo_peak, self.combo_count)
 
+        # ⭐ 连击经验倍率（>=5连击 ×1.5）
+        self.combo_xp_mult = 1.5 if self.combo_count >= 5 else 1.0
+
+        # ⭐ 连击里程碑触发
+        # 30连击：每30连回血一次
+        if self.combo_count >= 30 and self.combo_count - self._last_milestone_heal >= 30:
+            self.combo_milestone_heal = True
+            self._last_milestone_heal = self.combo_count
+        # 50连击：每50连掉落一个道具
+        if self.combo_count >= 50 and self.combo_count - self._last_milestone_drop >= 50:
+            self.combo_milestone_drop = True
+            self._last_milestone_drop = self.combo_count
+
         bonus = self._get_combo_bonus_score(enemy.score_value)
         self.score += enemy.score_value + bonus
         self.kills_this_frame += 1
         # ⭐ combo 加分飘字
         if bonus > 0:
             self.combo_bonus_texts.append((enemy.rect.centerx, enemy.rect.centery - 20, bonus))
-        # ⭐ 累计经验（⭐ 随关卡缩放：高关给更多经验）
-        xp_mult = max(1.0, self.current_level * 0.5)  # 第5关=2.5x, 第9关=4.5x
+        # ⭐ 累计经验（⭐ 随关卡缩放 + 连击倍率）
+        xp_mult = max(1.0, self.current_level * 0.5) * self.combo_xp_mult
         if isinstance(enemy, BossEnemy):
             self.xp_earned += int(XP_BOSS * xp_mult)
         elif isinstance(enemy, EliteEnemy):
