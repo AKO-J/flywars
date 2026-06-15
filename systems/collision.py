@@ -65,7 +65,9 @@ class CollisionSystem:
         self.combo_bonus_texts: list[tuple[int, int, int]] = []
         # ⭐ 空间哈希（精灵数多时启用）
         self._spatial: SpatialHash = SpatialHash(cell_size=64)
-        self._spatial_enabled: bool = False  # ⚠ 暂时禁用空间哈希（配对格式与 groupcollide 不兼容）
+        self._spatial_enabled: bool = True  # ⭐ 空间哈希已启用
+        # ⭐ 当前关卡（用于缩放经验获取）
+        self.current_level: int = 1
 
         # ⭐ Combo 连击系统
         self.combo_count: int = 0           # 当前连击数
@@ -278,17 +280,18 @@ class CollisionSystem:
         # ⭐ combo 加分飘字
         if bonus > 0:
             self.combo_bonus_texts.append((enemy.rect.centerx, enemy.rect.centery - 20, bonus))
-        # ⭐ 累计经验
+        # ⭐ 累计经验（⭐ 随关卡缩放：高关给更多经验）
+        xp_mult = max(1.0, self.current_level * 0.5)  # 第5关=2.5x, 第9关=4.5x
         if isinstance(enemy, BossEnemy):
-            self.xp_earned += XP_BOSS
+            self.xp_earned += int(XP_BOSS * xp_mult)
         elif isinstance(enemy, EliteEnemy):
-            self.xp_earned += XP_ELITE
+            self.xp_earned += int(XP_ELITE * xp_mult)
         elif isinstance(enemy, TrackingEnemy):
-            self.xp_earned += XP_TRACKING
+            self.xp_earned += int(XP_TRACKING * xp_mult)
         elif isinstance(enemy, FastEnemy):
-            self.xp_earned += XP_FAST
+            self.xp_earned += int(XP_FAST * xp_mult)
         elif isinstance(enemy, NormalEnemy):
-            self.xp_earned += XP_NORMAL
+            self.xp_earned += int(XP_NORMAL * xp_mult)
         esize = _explosion_size(enemy)
         self.explosion_positions.append((enemy.rect.centerx, enemy.rect.centery, esize))
         self.floating_texts.append(

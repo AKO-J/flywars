@@ -66,6 +66,10 @@ ORANGE: tuple = (255, 165, 0)
 # ---------------------- 玩家设置 ---------------------- #
 # 玩家飞机移动速度（像素/帧）
 PLAYER_SPEED: int = 5
+# ⭐ 升级每级移速增量（原+1）
+PLAYER_SPEED_PER_UPGRADE: int = 2
+# ⭐ 升级每级蓄力倍率（原0.92，越小越快）
+PLAYER_CHARGE_MULT_PER_UPGRADE: float = 0.85
 # Shift加速倍率（按住 Shift 时速度 = PLAYER_SPEED × 此值）
 PLAYER_BOOST_MULTIPLIER: float = 1.8
 # 玩家飞机初始生命值
@@ -212,16 +216,130 @@ DIFFICULTY_SPEED_SCALE: float = 1.12            # 原1.10 → 更快
 DIFFICULTY_HP_SCALE: float = 1.18               # 原1.15 → 更耐打
 # 每提升一级，敌机射速乘以该系数（>1 则子弹更密）⭐ 新增
 DIFFICULTY_FIRE_RATE_SCALE: float = 0.88        # <1 射击间隔缩短
+# ⭐ 非线性难度指数：>1 时后期难度陡增，<1 时前期更难
+# 公式：effective_level = level ** DIFFICULTY_NONLINEAR_EXP
+# level=1~3: 平缓  level=4~6: 加速  level=7~9: 陡升
+DIFFICULTY_NONLINEAR_EXP: float = 1.3
+
 # 生成间隔的下限（秒），防止间隔过短
 SPAWN_INTERVAL_MIN: float = 0.15                # 原0.20 → 更密集
 
-# ---------------------- UI 设置 ---------------------- #
+# ---------------------- 关卡波次系统（⭐ 全新设计） ---------------------- #
+# 每关由若干波次组成，清完波次出 Boss，Boss 击败进入下一关
+# 波次定义：(敌机类型, 数量) 的列表
+
+# 敌机类型别名
+from typing import Literal
+EnemyWaveType = Literal["normal", "fast", "elite", "tracking"]
+
+# 波次结构：[(type, count), ...]
+LEVEL_WAVES: dict[int, dict] = {
+    1: {  # 入门关
+        "waves": [
+            [("normal", 3)],
+            [("normal", 4)],
+            [("normal", 3), ("fast", 1)],
+        ],
+        "spawn_interval": 0.9,
+        "has_boss": False,
+    },
+    2: {  # 引入快速敌机
+        "waves": [
+            [("normal", 4)],
+            [("normal", 3), ("fast", 2)],
+            [("normal", 4), ("fast", 2)],
+        ],
+        "spawn_interval": 0.8,
+        "has_boss": False,
+    },
+    3: {  # 引入精英敌机（无Boss，积累期）
+        "waves": [
+            [("normal", 4), ("fast", 1)],
+            [("normal", 3), ("elite", 1)],
+            [("normal", 4), ("fast", 3)],
+            [("normal", 5), ("fast", 2), ("elite", 1)],
+        ],
+        "spawn_interval": 0.7,
+        "has_boss": False,
+    },
+    4: {  # 引入追踪敌机（无Boss，积累期）
+        "waves": [
+            [("normal", 4), ("fast", 2)],
+            [("normal", 3), ("fast", 2), ("tracking", 1)],
+            [("normal", 4), ("fast", 3), ("elite", 1)],
+            [("normal", 5), ("fast", 3), ("tracking", 1)],
+        ],
+        "spawn_interval": 0.65,
+        "has_boss": False,
+    },
+    5: {  # ⭐ 首个 Boss 战
+        "waves": [
+            [("normal", 5), ("fast", 2)],
+            [("normal", 3), ("fast", 3), ("elite", 1)],
+            [("normal", 4), ("fast", 3), ("elite", 2)],
+            [("normal", 6), ("fast", 3), ("tracking", 1)],
+        ],
+        "spawn_interval": 0.6,
+        "has_boss": True,
+    },
+    6: {  # 战间期（无Boss，混合编队）
+        "waves": [
+            [("normal", 4), ("fast", 3), ("tracking", 1)],
+            [("normal", 3), ("fast", 2), ("elite", 2)],
+            [("normal", 4), ("fast", 3), ("elite", 2)],
+            [("normal", 5), ("fast", 3), ("tracking", 2)],
+            [("normal", 6), ("fast", 4), ("elite", 1), ("tracking", 1)],
+        ],
+        "spawn_interval": 0.55,
+        "has_boss": False,
+    },
+    7: {  # 高密度（无Boss）
+        "waves": [
+            [("normal", 6), ("fast", 3), ("tracking", 1)],
+            [("normal", 5), ("fast", 4), ("elite", 2)],
+            [("normal", 6), ("fast", 3), ("tracking", 2)],
+            [("normal", 5), ("fast", 4), ("elite", 2), ("tracking", 2)],
+            [("normal", 8), ("fast", 5), ("elite", 2)],
+        ],
+        "spawn_interval": 0.5,
+        "has_boss": False,
+    },
+    8: {  # 最终关前哨（无Boss）
+        "waves": [
+            [("normal", 6), ("fast", 4), ("tracking", 2)],
+            [("normal", 5), ("fast", 4), ("elite", 3)],
+            [("normal", 6), ("fast", 5), ("tracking", 3)],
+            [("normal", 8), ("fast", 4), ("elite", 3), ("tracking", 2)],
+            [("normal", 10), ("fast", 5), ("elite", 3), ("tracking", 2)],
+        ],
+        "spawn_interval": 0.45,
+        "has_boss": False,
+    },
+    9: {  # ⭐ 最终 Boss 战
+        "waves": [
+            [("normal", 8), ("fast", 5), ("tracking", 2)],
+            [("normal", 6), ("fast", 5), ("elite", 3), ("tracking", 2)],
+            [("normal", 10), ("fast", 4), ("elite", 3)],
+            [("normal", 8), ("fast", 5), ("tracking", 3), ("elite", 2)],
+            [("normal", 10), ("fast", 6), ("elite", 4), ("tracking", 3)],
+            [("normal", 8), ("fast", 6), ("elite", 4), ("tracking", 3)],
+        ],
+        "spawn_interval": 0.4,
+        "has_boss": True,
+        "final": True,  # 击败最终 Boss 通关
+    },
+}
+
+# 波次间休息时间（秒）
+WAVE_REST_DURATION: float = 2.0
+# 波次推进提示显示时间
+WAVE_ANNOUNCE_DURATION: float = 1.5
 # 飘字得分：上浮速度（像素/秒）
 FLOATING_TEXT_SPEED: float = 80.0
 # 飘字得分：存在时间（秒）
 FLOATING_TEXT_LIFETIME: float = 1.0
 # 关卡：每 N 分升一级
-LEVEL_SCORE_BASE: int = 500
+LEVEL_SCORE_BASE: int = 800        # 原500 → 每关间距拉大，升级节奏更舒服
 # 关卡提升提示显示时长（秒）
 LEVEL_UP_DISPLAY_TIME: float = 2.0
 
@@ -251,19 +369,19 @@ PLAYER_MAX_BOMBS: int = 3
 
 # ---------------------- 玩家成长系统（⭐ 新增） ---------------------- #
 # 击杀经验值
-XP_NORMAL: int = 10            # 普通敌机
-XP_FAST: int = 15              # 快速敌机
-XP_ELITE: int = 30             # 精英敌机
-XP_TRACKING: int = 25          # 追踪敌机
-XP_BOSS: int = 100             # Boss
+XP_NORMAL: int = 15            # 普通敌机（原10）
+XP_FAST: int = 25              # 快速敌机（原15）
+XP_ELITE: int = 50             # 精英敌机（原30）
+XP_TRACKING: int = 40          # 追踪敌机（原25）
+XP_BOSS: int = 200             # Boss（原100）
 
 # 升级所需经验公式: BASE + (level-1) × SCALE
-XP_LEVEL_BASE: int = 80        # 1级→2级所需经验
-XP_LEVEL_SCALE: int = 40       # 每级递增
+XP_LEVEL_BASE: int = 100       # 1级→2级所需经验（原80）
+XP_LEVEL_SCALE: int = 50       # 每级递增（原40）
 XP_LEVEL_MAX: int = 99         # 最高等级
 
 # 强化类型
-UPGRADE_MAX_LEVEL: int = 5                # 每项强化最高等级
+UPGRADE_MAX_LEVEL: int = 8                # 每项强化最高等级（原5）
 UPGRADE_POINTS_PER_LEVEL: int = 1         # 每升1级获得点数
 # 道具主题色（程序化渲染用）
 POWERUP_COLORS: dict = {

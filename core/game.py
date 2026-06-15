@@ -976,28 +976,27 @@ class Game:
         if self._use_dirty_rects:
             _pre_sprites: set = set(self.all_sprites.sprites())
 
-        # ---- 关卡同步（UI 检测到升级 → 通知 spawner） ----
-        new_level = self.collision.score // LEVEL_SCORE_BASE + 1
-        if new_level != self.spawner.level:
-            self.spawner.set_level(new_level)
-            self._event_bus.publish(Event(GameEvent.LEVEL_UP, {
-                "level": new_level, "score": self.collision.score,
-            }))
-            # ⭐ 升级粒子光环（在屏幕中心爆发）
-            self.particles.level_up_ring(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
-            # ⭐ 关卡背景主题切换
-            if self.background.set_theme_by_level(new_level):
-                gl = GameLogger.get_instance()
-                gl.info("背景主题切换", level=new_level,
-                        theme=self.background.current_theme.name)
-            # ⭐ 关卡通提示：闪屏 + 大字（如果过渡已在播放，只更新文字，不重置动画）
-            if self._level_transition_timer > 0:
-                # 过渡中再次升级：刷新文字，动画不重置
-                self._level_transition_text = f"—— 第 {new_level} 关 ——"
-                # 仍给一点点额外时间，避免刚显示就消失
-                self._level_transition_timer = max(self._level_transition_timer, 1.5)
+        # ---- 波次/关卡推进（⭐ 波次制替代分数制） ----
+        if self.spawner.level_complete:
+            new_level = self.spawner.level + 1
+            if new_level > FINAL_BOSS_LEVEL:
+                # 通关第9关 → 胜利
+                self.state = GameState.VICTORY
+                self._event_bus.publish(Event(GameEvent.GAME_OVER, {
+                    "victory": True, "score": self.collision.score,
+                }))
+                self.audio.stop_bgm()
             else:
-                # 全新过渡：完整动画
+                self.spawner.set_level(new_level)
+                self.collision.current_level = new_level  # ⭐ 同步关卡到碰撞系统
+                self._event_bus.publish(Event(GameEvent.LEVEL_UP, {
+                    "level": new_level, "score": self.collision.score,
+                }))
+                self.particles.level_up_ring(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
+                if self.background.set_theme_by_level(new_level):
+                    gl = GameLogger.get_instance()
+                    gl.info("背景主题切换", level=new_level,
+                            theme=self.background.current_theme.name)
                 self._level_transition_alpha = 200
                 self._level_transition_timer = 2.5
                 self._level_transition_text = f"—— 第 {new_level} 关 ——"
@@ -1092,6 +1091,8 @@ class Game:
         for pos in self.collision.explosion_positions:
             esize = pos[2] if len(pos) > 2 else "normal"
             exp = Explosion(pos[0], pos[1], esize)
+            # ⭐ 通知 spawner 记录击杀（用于波次清空检测）
+            self.spawner.on_enemy_killed()
             if esize == "big":
                 self._screen_shake = max(self._screen_shake, 3)
             elif esize == "huge":
@@ -1344,6 +1345,8 @@ class Game:
 
         # ── 团队积分 / 计时器 ──
         self._draw_team_hud()
+        # ── 波次信息 ──
+        self._draw_wave_info()
         # ── 远程玩家 ──
         self._draw_remote_player()
 
@@ -1478,6 +1481,8 @@ class Game:
 
         # ── 团队积分 / 计时器 ──
         self._draw_team_hud()
+        # ── 波次信息 ──
+        self._draw_wave_info()
         # ── 远程玩家 ──
         self._draw_remote_player()
 
@@ -1491,6 +1496,36 @@ class Game:
 
         # ⑤ clear/draw 流程保证了精灵旧位置擦除 + 层级排序 + dirty 追踪
         #    最终 flip 由 render() 统一调用，确保 FPS 文字等也一并刷新
+
+    def _draw_wave_info(self) -> None:
+        """在屏幕右上角显示关卡/波次信息。"""
+        if self.state not in (GameState.PLAYING, GameState.PAUSED):
+            return
+        s = self.spawner
+        if s.total_waves <= 0:
+            return
+        try:
+            font = pygame.font.Font(UI_FONT_PATH, 18)
+        except Exception:
+            font = pygame.font.Font(None, 18)
+        level_text = font.render(f"第 {s.level} 关", True, (200, 220, 255))
+        lr = level_text.get_rect(topright=(SCREEN_WIDTH - 12, 8))
+        self.screen.blit(level_text, lr)
+        if s.all_waves_done:
+            wave_str = "⚔ BOSS" if s.boss_active else "✓ 通关"
+        elif s.is_resting:
+            wave_str = f"波次 {s.current_wave + 1}/{s.total_waves} ⏳"
+        else:
+            wave_str = f"波次 {s.current_wave + 1}/{s.total_waves}"
+        wave_color = (100, 255, 100) if s.is_resting else (255, 220, 100)
+        wave_text = font.render(wave_str, True, wave_color)
+        wr = wave_text.get_rect(topright=(SCREEN_WIDTH - 12, 30))
+        self.screen.blit(wave_text, wr)
+        remaining = len(self.enemies) + (len(s._spawn_queue) if hasattr(s, '_spawn_queue') else 0)
+        if remaining > 0 and not s.all_waves_done:
+            rem_text = font.render(f"残敌 {remaining}", True, (180, 180, 200))
+            rr = rem_text.get_rect(topright=(SCREEN_WIDTH - 12, 50))
+            self.screen.blit(rem_text, rr)
 
     def _draw_fps(self) -> None:
         """在屏幕左上角绘制 FPS、脏矩形状态和 ⭐ 回放状态。"""
@@ -2059,17 +2094,8 @@ class Game:
     def _update_spawner_config(self) -> None:
         """从 settings 重新读取敌机生成配置，应用到当前 Spawner。"""
         import settings as _s
-        self.spawner._base_intervals = {
-            "normal":   _s.ENEMY_NORMAL_SPAWN_INTERVAL,
-            "fast":     _s.ENEMY_FAST_SPAWN_INTERVAL,
-            "elite":    _s.ENEMY_ELITE_SPAWN_INTERVAL,
-            "tracking": _s.ENEMY_TRACKING_SPAWN_INTERVAL,
-        }
+        # 波次制 spawner 无需重算间隔，只需重新设置关卡
         self.spawner.set_level(self.spawner.level)
-        # 钳制已累积的计时器，避免新间隔延迟生效
-        for key in self.spawner._timers:
-            if self.spawner._timers[key] > self.spawner._intervals[key]:
-                self.spawner._timers[key] = self.spawner._intervals[key]
 
     def _rebuild_background_layers(self) -> None:
         """从 settings 重新计算背景每层的星星速度。"""
@@ -2434,6 +2460,7 @@ class Game:
         self.spawner.set_player(self.player)
 
         self.collision.reset()
+        self.collision.current_level = 1  # ⭐ 初始关卡
         self.ui.reset()
         self.audio.reset()  # ⭐ 重置音频状态
         # ⭐ 背景主题重置为星空

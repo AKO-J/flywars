@@ -30,6 +30,7 @@ from settings import (
     UPGRADE_MAX_LEVEL, UPGRADE_POINTS_PER_LEVEL,
     PLAYER_SPEED, PLAYER_MAX_HP, PLAYER_CHARGE_TIME,
     PLAYER_BULLET_DAMAGE, PLAYER_INVINCIBLE_TIME,
+    PLAYER_SPEED_PER_UPGRADE, PLAYER_CHARGE_MULT_PER_UPGRADE,
     UI_FONT_PATH,
     BLACK, WHITE, RED, GREEN, YELLOW, CYAN, ORANGE,
     DARK_GRAY, GRAY,
@@ -68,7 +69,7 @@ UPGRADE_DEFS: list[dict] = [
     {
         "id": "speed",
         "name": "💨 机动增强",
-        "desc": "移动速度 +1",
+        "desc": f"移动速度 +{PLAYER_SPEED_PER_UPGRADE}",
         "max_level": UPGRADE_MAX_LEVEL,
         "icon": "💨",
         "color": (80, 200, 255),
@@ -262,14 +263,14 @@ def apply_upgrades_to_player(player, upgrades: PlayerUpgradeData) -> None:
     # 火力提升
     player._extra_damage = lv_damage
 
-    # 蓄力加速
+    # 蓄力加速（⭐ 每级 ×0.85 原×0.92）
     if lv_charge > 0:
-        player._charge_time = PLAYER_CHARGE_TIME * (0.92 ** lv_charge)
+        player._charge_time = PLAYER_CHARGE_TIME * (PLAYER_CHARGE_MULT_PER_UPGRADE ** lv_charge)
     else:
         player._charge_time = PLAYER_CHARGE_TIME
 
-    # 机动增强
-    player.base_speed = PLAYER_SPEED + lv_speed
+    # 机动增强（⭐ 每级 +2 原+1）
+    player.base_speed = PLAYER_SPEED + lv_speed * PLAYER_SPEED_PER_UPGRADE
 
     # 护盾精通
     if lv_shield > 0:
@@ -277,8 +278,22 @@ def apply_upgrades_to_player(player, upgrades: PlayerUpgradeData) -> None:
     else:
         player._invincible_duration = PLAYER_INVINCIBLE_TIME
 
-    # 弹幕扩散（在 player.fire() 中使用）
+    # 弹幕扩散（⭐ 蓄力和基础射击都加弹）
     player._spread_upgrade = upgrades.get_upgrade_level("spread")
+
+    # ⭐ 视觉反馈：根据火力等级改变子弹颜色/大小
+    if lv_damage >= 5:
+        player._bullet_color_override = (255, 50, 50)   # 高火力：红色
+        player._bullet_size_override = 3                 # 子弹更大
+    elif lv_damage >= 3:
+        player._bullet_color_override = (255, 180, 50)  # 中火力：金色
+        player._bullet_size_override = 2
+    elif lv_damage >= 1:
+        player._bullet_color_override = (100, 200, 255) # 低火力：青色
+        player._bullet_size_override = 1
+    else:
+        player._bullet_color_override = None             # 默认白色
+        player._bullet_size_override = 0
 
 
 # ==========================================================================
@@ -415,8 +430,8 @@ def render_upgrade_screen(
     stats = [
         f"❤️ HP: {PLAYER_MAX_HP + data.get_upgrade_level('hp')}",
         f"⚡ 伤害: {PLAYER_BULLET_DAMAGE + data.get_upgrade_level('damage')}",
-        f"🔥 蓄力: {PLAYER_CHARGE_TIME * (0.92 ** data.get_upgrade_level('charge_speed')):.2f}s",
-        f"💨 速度: {PLAYER_SPEED + data.get_upgrade_level('speed')}",
+        f"🔥 蓄力: {PLAYER_CHARGE_TIME * (PLAYER_CHARGE_MULT_PER_UPGRADE ** data.get_upgrade_level('charge_speed')):.2f}s",
+        f"💨 速度: {PLAYER_SPEED + data.get_upgrade_level('speed') * PLAYER_SPEED_PER_UPGRADE}",
         f"🌊 弹幕: +{data.get_upgrade_level('spread')}",
         f"🛡️ 无敌: {PLAYER_INVINCIBLE_TIME + data.get_upgrade_level('shield') * 0.3:.1f}s",
     ]
