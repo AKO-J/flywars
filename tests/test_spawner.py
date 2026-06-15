@@ -38,7 +38,7 @@ class TestSpawnerLevel:
         s = Spawner()
         s.set_level(100)  # extreme level
         for interval in s._intervals.values():
-            assert interval >= 0.20  # SPAWN_INTERVAL_MIN
+            assert interval >= 0.15  # SPAWN_INTERVAL_MIN
 
 
 class TestSpawnerBoss:

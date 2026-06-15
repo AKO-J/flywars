@@ -715,6 +715,15 @@ class Game:
                 self.bullets.add(b)
                 self.all_sprites.add(b)
 
+        # ⭐ 敌机弹幕：遍历所有存活敌机，收集其发射的子弹
+        for enemy in self.enemies:
+            if not enemy.alive():
+                continue
+            enemy_bullets = enemy.fire(self.dt)
+            for b in enemy_bullets:
+                self.bullets.add(b)
+                self.all_sprites.add(b)
+
         # ---- 更新精灵 ----
         self.all_sprites.update(self.dt)
 

@@ -124,6 +124,7 @@ ENEMY_NORMAL_SCORE: int = 100           # 击毁得分
 ENEMY_NORMAL_WIDTH: int = 40            # 图像宽度
 ENEMY_NORMAL_HEIGHT: int = 40           # 图像高度
 ENEMY_NORMAL_SPAWN_INTERVAL: float = 1.5  # 生成间隔（秒）
+ENEMY_NORMAL_FIRE_INTERVAL: float = 2.8   # 射击间隔（秒）⭐ 新增
 
 # 快速敌机
 ENEMY_FAST_SPEED: float = 280.0         # 移动速度（像素/秒）
@@ -133,6 +134,7 @@ ENEMY_FAST_WIDTH: int = 28              # 图像宽度
 ENEMY_FAST_HEIGHT: int = 28             # 图像高度
 ENEMY_FAST_SPAWN_INTERVAL: float = 3.5  # 生成间隔（秒）
 ENEMY_FAST_DIAGONAL_SPEED: float = 120.0  # 斜向水平速度（px/s）
+ENEMY_FAST_FIRE_INTERVAL: float = 2.2    # 射击间隔（秒）⭐ 新增
 
 # 精英敌机（正弦波移动）
 ENEMY_ELITE_SPEED: float = 100.0          # 垂直速度（px/s）
@@ -143,6 +145,9 @@ ENEMY_ELITE_HEIGHT: int = 44              # 图像高度
 ENEMY_ELITE_SPAWN_INTERVAL: float = 6.0   # 生成间隔（秒）
 ENEMY_ELITE_WAVE_AMPLITUDE: float = 80.0  # 正弦波振幅（像素）
 ENEMY_ELITE_WAVE_FREQUENCY: float = 2.5   # 正弦波频率（Hz）
+ENEMY_ELITE_FIRE_INTERVAL: float = 1.5    # 射击间隔（秒）⭐ 新增
+ENEMY_ELITE_BURST_COUNT: int = 3          # 连射发数 ⭐ 新增
+ENEMY_ELITE_BURST_INTERVAL: float = 0.12  # 连射间隔（秒）⭐ 新增
 
 # 追踪敌机（跟踪玩家）
 ENEMY_TRACKING_SPEED: float = 180.0       # 移动速度（px/s）
@@ -151,6 +156,7 @@ ENEMY_TRACKING_SCORE: int = 250           # 击毁得分
 ENEMY_TRACKING_WIDTH: int = 34            # 图像宽度
 ENEMY_TRACKING_HEIGHT: int = 34           # 图像高度
 ENEMY_TRACKING_SPAWN_INTERVAL: float = 8.0  # 生成间隔（秒）
+ENEMY_TRACKING_FIRE_INTERVAL: float = 1.8   # 射击间隔（秒）⭐ 新增
 
 # ---------------------- 爆炸特效设置 ---------------------- #
 # 爆炸动画帧总数
@@ -164,18 +170,18 @@ EXPLOSION_SIZE: int = 64
 # Boss 首次出现的关卡
 BOSS_SPAWN_LEVEL: int = 3
 # Boss 生命值（基础值，随关卡进一步缩放）
-BOSS_HP: int = 50
+BOSS_HP: int = 60                    # 原50 → 更高
 # Boss 移动速度（像素/秒）
-BOSS_SPEED: float = 60.0
+BOSS_SPEED: float = 65.0             # 原60 → 稍快
 # Boss 击毁得分
 BOSS_SCORE: int = 1000
 # Boss 显示尺寸（题19：真实素材宽高比 ~2.5:1）
 BOSS_WIDTH: int = 150
 BOSS_HEIGHT: int = 62
-# Boss 弹幕发射间隔（秒）
-BOSS_FIRE_INTERVAL_CIRCLE: float = 2.0    # 圆形弹幕
-BOSS_FIRE_INTERVAL_AIMED: float = 1.5     # 瞄准弹幕
-BOSS_FIRE_INTERVAL_SPIRAL: float = 0.08   # 螺旋弹幕（连续）
+# Boss 弹幕发射间隔（秒）⭐ 全部缩短 → 弹幕更密
+BOSS_FIRE_INTERVAL_CIRCLE: float = 1.6    # 原2.0 → 圆形弹幕更密集
+BOSS_FIRE_INTERVAL_AIMED: float = 1.2     # 原1.5 → 瞄准弹幕更频繁
+BOSS_FIRE_INTERVAL_SPIRAL: float = 0.06   # 原0.08 → 螺旋弹幕更密
 # Boss 进入阶段：从顶部移动到目标Y位置的时间（秒）
 BOSS_ENTER_DURATION: float = 2.0
 # Boss 巡逻左右边界（像素，距边缘）
@@ -183,26 +189,28 @@ BOSS_PATROL_MARGIN: int = 60
 # Boss 子弹伤害
 BOSS_BULLET_DAMAGE: int = 1
 # Boss 子弹速度（像素/秒）
-BOSS_BULLET_SPEED: float = 200.0
+BOSS_BULLET_SPEED: float = 220.0          # 原200 → 更快
 # Boss 扇形弹幕（题19）
-BOSS_FAN_COUNT: int = 12            # 扇形弹幕子弹数量
-BOSS_FAN_ANGLE: float = 110.0       # 扇形散射角度（度）
-BOSS_FAN_INTERVAL: float = 2.2      # 扇形弹幕发射间隔（秒）
+BOSS_FAN_COUNT: int = 16                  # 原12 → 更多弹头
+BOSS_FAN_ANGLE: float = 120.0             # 原110° → 更宽角度
+BOSS_FAN_INTERVAL: float = 1.8            # 原2.2 → 更频繁
 # Boss 死亡特效（题19）
 BOSS_EXPLOSION_COUNT: int = 10      # Boss 死亡时生成爆炸数量
 BOSS_EXPLOSION_DELAY: float = 0.10  # 连续爆炸间隔（秒）
 # 通关设置（题19）
 FINAL_BOSS_LEVEL: int = 9           # 击败该关卡 Boss 后显示通关界面
 
-# ---------------------- 难度递增设置（题15） ---------------------- #
+# ---------------------- 难度递增设置（题15 ⭐ 增强版） ---------------------- #
 # 每提升一级，生成间隔乘以该系数（<1 则敌机越来越密）
-DIFFICULTY_SPAWN_INTERVAL_SCALE: float = 0.85
+DIFFICULTY_SPAWN_INTERVAL_SCALE: float = 0.82  # 原0.85 → 更密
 # 每提升一级，敌机速度乘以该系数（>1 则越来越快）
-DIFFICULTY_SPEED_SCALE: float = 1.10
+DIFFICULTY_SPEED_SCALE: float = 1.12            # 原1.10 → 更快
 # 每提升一级，敌机 HP 乘以该系数（>1 则越来越肉）
-DIFFICULTY_HP_SCALE: float = 1.15
+DIFFICULTY_HP_SCALE: float = 1.18               # 原1.15 → 更耐打
+# 每提升一级，敌机射速乘以该系数（>1 则子弹更密）⭐ 新增
+DIFFICULTY_FIRE_RATE_SCALE: float = 0.88        # <1 射击间隔缩短
 # 生成间隔的下限（秒），防止间隔过短
-SPAWN_INTERVAL_MIN: float = 0.20
+SPAWN_INTERVAL_MIN: float = 0.15                # 原0.20 → 更密集
 
 # ---------------------- UI 设置 ---------------------- #
 # 飘字得分：上浮速度（像素/秒）

@@ -19,8 +19,11 @@ from settings import (
     SCREEN_WIDTH,
     ENEMY_NORMAL_SPAWN_INTERVAL, ENEMY_FAST_SPAWN_INTERVAL,
     ENEMY_ELITE_SPAWN_INTERVAL, ENEMY_TRACKING_SPAWN_INTERVAL,
+    ENEMY_NORMAL_FIRE_INTERVAL, ENEMY_FAST_FIRE_INTERVAL,
+    ENEMY_ELITE_FIRE_INTERVAL, ENEMY_TRACKING_FIRE_INTERVAL,
     BOSS_SPAWN_LEVEL,
-    DIFFICULTY_SPAWN_INTERVAL_SCALE, DIFFICULTY_SPEED_SCALE, DIFFICULTY_HP_SCALE,
+    DIFFICULTY_SPAWN_INTERVAL_SCALE, DIFFICULTY_SPEED_SCALE,
+    DIFFICULTY_HP_SCALE, DIFFICULTY_FIRE_RATE_SCALE,
     SPAWN_INTERVAL_MIN,
 )
 from sprites.enemy import NormalEnemy, FastEnemy, EliteEnemy, TrackingEnemy, BossEnemy
@@ -129,15 +132,16 @@ class Spawner:
         # ---- 普通敌机 ----
         speed_scale = DIFFICULTY_SPEED_SCALE ** (self._level - 1)
         hp_scale = DIFFICULTY_HP_SCALE ** (self._level - 1)
+        fire_scale = DIFFICULTY_FIRE_RATE_SCALE ** (self._level - 1)  # <1 → 射速更快
 
         self._spawn_if_ready("normal", dt, enemy_group, all_sprites,
-                             lambda: self._make_normal(speed_scale, hp_scale))
+                             lambda: self._make_normal(speed_scale, hp_scale, fire_scale))
         self._spawn_if_ready("fast", dt, enemy_group, all_sprites,
-                             lambda: self._make_fast(speed_scale, hp_scale))
+                             lambda: self._make_fast(speed_scale, hp_scale, fire_scale))
         self._spawn_if_ready("elite", dt, enemy_group, all_sprites,
-                             lambda: self._make_elite(speed_scale, hp_scale))
+                             lambda: self._make_elite(speed_scale, hp_scale, fire_scale))
         self._spawn_if_ready("tracking", dt, enemy_group, all_sprites,
-                             lambda: self._make_tracking(speed_scale, hp_scale))
+                             lambda: self._make_tracking(speed_scale, hp_scale, fire_scale))
 
         return new_boss
 
@@ -206,27 +210,29 @@ class Spawner:
     # ================================================================
 
     @staticmethod
-    def _scale_enemy(enemy, speed_scale: float, hp_scale: float):
+    def _scale_enemy(enemy, speed_scale: float, hp_scale: float, fire_scale: float = 1.0):
         enemy.speed *= speed_scale
         enemy.hp = int(enemy.hp * hp_scale)
         enemy.max_hp = enemy.hp
+        enemy._fire_interval *= fire_scale  # 射速缩放
 
-    def _make_normal(self, speed_scale: float, hp_scale: float) -> NormalEnemy:
-        e = NormalEnemy()
+    def _make_normal(self, speed_scale: float, hp_scale: float, fire_scale: float = 1.0) -> NormalEnemy:
+        e = NormalEnemy(fire_interval=ENEMY_NORMAL_FIRE_INTERVAL * fire_scale)
         self._scale_enemy(e, speed_scale, hp_scale)
         return e
 
-    def _make_fast(self, speed_scale: float, hp_scale: float) -> FastEnemy:
-        e = FastEnemy()
+    def _make_fast(self, speed_scale: float, hp_scale: float, fire_scale: float = 1.0) -> FastEnemy:
+        e = FastEnemy(fire_interval=ENEMY_FAST_FIRE_INTERVAL * fire_scale)
         self._scale_enemy(e, speed_scale, hp_scale)
         return e
 
-    def _make_elite(self, speed_scale: float, hp_scale: float) -> EliteEnemy:
-        e = EliteEnemy()
+    def _make_elite(self, speed_scale: float, hp_scale: float, fire_scale: float = 1.0) -> EliteEnemy:
+        e = EliteEnemy(fire_interval=ENEMY_ELITE_FIRE_INTERVAL * fire_scale)
         self._scale_enemy(e, speed_scale, hp_scale)
+        e.set_player(self._player)
         return e
 
-    def _make_tracking(self, speed_scale: float, hp_scale: float) -> TrackingEnemy:
-        e = TrackingEnemy(self._player)
+    def _make_tracking(self, speed_scale: float, hp_scale: float, fire_scale: float = 1.0) -> TrackingEnemy:
+        e = TrackingEnemy(self._player, fire_interval=ENEMY_TRACKING_FIRE_INTERVAL * fire_scale)
         self._scale_enemy(e, speed_scale, hp_scale)
         return e

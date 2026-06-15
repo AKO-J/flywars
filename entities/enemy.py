@@ -24,18 +24,22 @@ from settings import (
     SCREEN_WIDTH, SCREEN_HEIGHT,
     ENEMY_NORMAL_SPEED, ENEMY_NORMAL_HP, ENEMY_NORMAL_SCORE,
     ENEMY_NORMAL_WIDTH, ENEMY_NORMAL_HEIGHT,
+    ENEMY_NORMAL_FIRE_INTERVAL,
     ENEMY_FAST_SPEED, ENEMY_FAST_HP, ENEMY_FAST_SCORE,
     ENEMY_FAST_WIDTH, ENEMY_FAST_HEIGHT, ENEMY_FAST_DIAGONAL_SPEED,
+    ENEMY_FAST_FIRE_INTERVAL,
     ENEMY_ELITE_SPEED, ENEMY_ELITE_HP, ENEMY_ELITE_SCORE,
     ENEMY_ELITE_WIDTH, ENEMY_ELITE_HEIGHT,
     ENEMY_ELITE_WAVE_AMPLITUDE, ENEMY_ELITE_WAVE_FREQUENCY,
+    ENEMY_ELITE_FIRE_INTERVAL, ENEMY_ELITE_BURST_COUNT, ENEMY_ELITE_BURST_INTERVAL,
     ENEMY_TRACKING_SPEED, ENEMY_TRACKING_HP, ENEMY_TRACKING_SCORE,
     ENEMY_TRACKING_WIDTH, ENEMY_TRACKING_HEIGHT,
+    ENEMY_TRACKING_FIRE_INTERVAL,
     BOSS_HP, BOSS_SPEED, BOSS_SCORE, BOSS_WIDTH, BOSS_HEIGHT,
     BOSS_FIRE_INTERVAL_CIRCLE, BOSS_FIRE_INTERVAL_AIMED, BOSS_FIRE_INTERVAL_SPIRAL,
     BOSS_ENTER_DURATION, BOSS_PATROL_MARGIN, BOSS_BULLET_DAMAGE, BOSS_BULLET_SPEED,
     BOSS_FAN_COUNT, BOSS_FAN_ANGLE, BOSS_FAN_INTERVAL, BOSS_EXPLOSION_COUNT,
-    DIFFICULTY_HP_SCALE,
+    DIFFICULTY_HP_SCALE, DIFFICULTY_FIRE_RATE_SCALE,
     LAYER_ENEMY, LAYER_BOSS, UI_FONT_PATH,
     ENEMY_NORMAL_IMAGE_PATH, ENEMY_FAST_IMAGE_PATH,
     ENEMY_ELITE_IMAGE_PATH, ENEMY_TRACKING_IMAGE_PATH,
@@ -103,6 +107,7 @@ class Enemy(pygame.sprite.DirtySprite):
         speed: float,
         hp: int,
         score_value: int,
+        fire_interval: float = 0.0,  # ⭐ 新增：射击间隔（0=不射击）
     ) -> None:
         super().__init__()
         self.image = image
@@ -117,6 +122,9 @@ class Enemy(pygame.sprite.DirtySprite):
         self.score_value: int = score_value
         self.layer: int = LAYER_ENEMY
         self.dirty: int = 2  # 敌机每帧移动，始终重绘
+        # ⭐ 射击系统
+        self._fire_timer: float = 0.0
+        self._fire_interval: float = fire_interval
 
     # ================================================================
     # 公共更新流程
@@ -161,6 +169,28 @@ class Enemy(pygame.sprite.DirtySprite):
             return True
         return False
 
+    # ================================================================
+    # 射击系统（⭐ 新增：小怪也能发射弹幕）
+    # ================================================================
+
+    def fire(self, dt: float) -> list:
+        """
+        每帧更新射击计时器，返回本帧需要发射的子弹列表。
+        ────────────────────────────────────────
+        基类返回空列表（不射击），子类重写以实现具体弹幕。
+        """
+        if self._fire_interval <= 0:
+            return []
+        self._fire_timer += dt
+        if self._fire_timer >= self._fire_interval:
+            self._fire_timer -= self._fire_interval
+            return self._do_fire()
+        return []
+
+    def _do_fire(self) -> list:
+        """子类重写：生成子弹列表。"""
+        return []
+
 
 # ==========================================================================
 # 具体敌机类型（四种移动模式）
@@ -168,40 +198,55 @@ class Enemy(pygame.sprite.DirtySprite):
 
 class NormalEnemy(Enemy):
     """
-    普通敌机 — 直线下落
+    普通敌机 — 直线下落 + 向下射击
     ————————————————————————————————
     模式：垂直向下匀速移动
     属性：150px/s | HP 2 | 得分 100
+    射击：每 2.8 秒发射一枚向下子弹
     """
 
-    def __init__(self, x: float | None = None, y: float | None = None) -> None:
+    def __init__(self, x: float | None = None, y: float | None = None,
+                 fire_interval: float | None = None) -> None:
         if x is None:
             x = random.uniform(40, SCREEN_WIDTH - 40)
         if y is None:
             y = random.uniform(-80, -20)
         super().__init__(_get_normal_image(), x, y,
-                         ENEMY_NORMAL_SPEED, ENEMY_NORMAL_HP, ENEMY_NORMAL_SCORE)
+                         ENEMY_NORMAL_SPEED, ENEMY_NORMAL_HP, ENEMY_NORMAL_SCORE,
+                         fire_interval=fire_interval or ENEMY_NORMAL_FIRE_INTERVAL)
 
     def _move(self, dt: float) -> None:
         """直线下落：仅 y 增加"""
         self._y += self.speed * dt
 
+    def _do_fire(self) -> list:
+        """发射一枚向下的普通子弹"""
+
+        return [Bullet(
+            self.rect.centerx, self.rect.bottom,
+            BulletSource.ENEMY, direction=1,
+            style="normal",
+        )]
+
 
 class FastEnemy(Enemy):
     """
-    快速敌机 — 斜向折返
+    快速敌机 — 斜向折返 + 斜向射击
     ————————————————————————————————
     模式：水平方向匀速 + 垂直下落，碰壁反弹
     属性：280px/s ↓ | 120px/s ↔ | HP 1 | 得分 150
+    射击：每 2.2 秒发射两枚斜向子弹
     """
 
-    def __init__(self, x: float | None = None, y: float | None = None) -> None:
+    def __init__(self, x: float | None = None, y: float | None = None,
+                 fire_interval: float | None = None) -> None:
         if x is None:
             x = random.uniform(30, SCREEN_WIDTH - 30)
         if y is None:
             y = random.uniform(-60, -15)
         super().__init__(_get_fast_image(), x, y,
-                         ENEMY_FAST_SPEED, ENEMY_FAST_HP, ENEMY_FAST_SCORE)
+                         ENEMY_FAST_SPEED, ENEMY_FAST_HP, ENEMY_FAST_SCORE,
+                         fire_interval=fire_interval or ENEMY_FAST_FIRE_INTERVAL)
         # 斜向水平速度（随机左右方向）
         self._diag_speed: float = ENEMY_FAST_DIAGONAL_SPEED * random.choice((-1, 1))
 
@@ -220,28 +265,55 @@ class FastEnemy(Enemy):
         # 垂直下落
         self._y += self.speed * dt
 
+    def _do_fire(self) -> list:
+        """发射两枚斜向橙色子弹（←↙ 和 ↘→）"""
+
+
+        cx, cy = self.rect.centerx, self.rect.bottom
+        bullets = []
+        for angle_offset in (-0.3, 0.3):  # 左右斜射
+            b = Bullet(cx, cy, BulletSource.ENEMY, direction=1,
+                       speed=200.0, style="fast")
+            b._vx = math.sin(angle_offset) * 200.0
+            b._vy = math.cos(angle_offset) * 200.0
+            b._custom_velocity = True
+            bullets.append(b)
+        return bullets
+
 
 class EliteEnemy(Enemy):
     """
-    精英敌机 — 正弦波移动
+    精英敌机 — 正弦波移动 + 连射弹幕
     ————————————————————————————————
     模式：垂直下落 + 水平正弦摆动
     公式：x = center_x + A × sin(2π × f × y / SCREEN_H)
     属性：100px/s | HP 4 | 得分 300 | 振幅 80px | 频率 2.5Hz
+    射击：每 1.5 秒 3 连射，瞄准玩家位置
     """
 
-    def __init__(self, x: float | None = None, y: float | None = None) -> None:
+    def __init__(self, x: float | None = None, y: float | None = None,
+                 fire_interval: float | None = None) -> None:
         if x is None:
             x = SCREEN_WIDTH // 2  # 从屏幕中央开始
         if y is None:
             y = random.uniform(-100, -30)
         super().__init__(_get_elite_image(), x, y,
-                         ENEMY_ELITE_SPEED, ENEMY_ELITE_HP, ENEMY_ELITE_SCORE)
+                         ENEMY_ELITE_SPEED, ENEMY_ELITE_HP, ENEMY_ELITE_SCORE,
+                         fire_interval=fire_interval or ENEMY_ELITE_FIRE_INTERVAL)
         # 正弦波参数
         self._wave_center_x: float = x
         self._wave_amplitude: float = ENEMY_ELITE_WAVE_AMPLITUDE
         self._wave_frequency: float = ENEMY_ELITE_WAVE_FREQUENCY
         self._total_distance: float = 0.0  # 累计下落距离（用于相位计算）
+        # 连射状态
+        self._burst_remaining: int = 0
+        self._burst_timer: float = 0.0
+        # 玩家引用（用于瞄准射击）
+        self._player: pygame.sprite.Sprite | None = None
+
+    def set_player(self, player_sprite: pygame.sprite.Sprite) -> None:
+        """设置玩家引用（用于瞄准射击）"""
+        self._player = player_sprite
 
     def _move(self, dt: float) -> None:
         """正弦波移动：y 匀速下落，x 按正弦函数摆动"""
@@ -256,13 +328,72 @@ class EliteEnemy(Enemy):
                         * 2.0 * math.pi)
         self._x = self._wave_center_x + self._wave_amplitude * math.sin(phase)
 
+    def fire(self, dt: float) -> list:
+        """
+        精英敌机连射：一次触发发射多枚子弹（burst）。
+        ────────────────────────────────────────
+        覆盖基类 fire() 以支持 burst：
+        每次射击间隔触发连射（ENEMY_ELITE_BURST_COUNT 发）。
+        """
+        if self._fire_interval <= 0:
+            return []
+
+        self._fire_timer += dt
+
+        # 处理连射中剩余子弹
+        if self._burst_remaining > 0:
+            self._burst_timer += dt
+            bullets = []
+            while self._burst_timer >= ENEMY_ELITE_BURST_INTERVAL and self._burst_remaining > 0:
+                self._burst_timer -= ENEMY_ELITE_BURST_INTERVAL
+                self._burst_remaining -= 1
+                b = self._do_fire_aimed()
+                if b:
+                    bullets.extend(b)
+            return bullets
+
+        # 触发新的一轮射击
+        if self._fire_timer >= self._fire_interval:
+            self._fire_timer -= self._fire_interval
+            # 开始连射
+            self._burst_remaining = ENEMY_ELITE_BURST_COUNT - 1
+            self._burst_timer = 0.0
+            return self._do_fire_aimed()  # 第一发立即发射
+
+        return []
+
+    def _do_fire_aimed(self) -> list:
+        """发射一枚瞄准玩家的紫色子弹"""
+
+
+        cx, cy = self.rect.centerx, self.rect.bottom
+
+        if self._player is not None:
+            dx = float(self._player.rect.centerx) - cx
+            dy = float(self._player.rect.centery) - cy
+            dist = math.hypot(dx, dy)
+            if dist < 1:
+                dx, dy = 0.0, 1.0
+                dist = 1.0
+            nx, ny = dx / dist, dy / dist
+        else:
+            nx, ny = 0.0, 1.0
+
+        b = Bullet(cx, cy, BulletSource.ENEMY, direction=1,
+                   speed=220.0, style="elite")
+        b._vx = nx * 220.0
+        b._vy = ny * 220.0
+        b._custom_velocity = True
+        return [b]
+
 
 class TrackingEnemy(Enemy):
     """
-    追踪敌机 — 追踪玩家
+    追踪敌机 — 追踪玩家 + 追踪射击
     ————————————————————————————————
     模式：每帧向玩家当前位置移动（线性插值逼近）
     属性：180px/s | HP 3 | 得分 250
+    射击：每 1.8 秒发射两枚粉红追踪弹（略散开）
     """
 
     def __init__(
@@ -270,6 +401,7 @@ class TrackingEnemy(Enemy):
         player_sprite: pygame.sprite.Sprite | None = None,
         x: float | None = None,
         y: float | None = None,
+        fire_interval: float | None = None,
     ) -> None:
         if x is None:
             x = random.uniform(30, SCREEN_WIDTH - 30)
@@ -277,7 +409,8 @@ class TrackingEnemy(Enemy):
             y = random.uniform(-80, -20)
         super().__init__(_get_tracking_image(), x, y,
                          ENEMY_TRACKING_SPEED, ENEMY_TRACKING_HP,
-                         ENEMY_TRACKING_SCORE)
+                         ENEMY_TRACKING_SCORE,
+                         fire_interval=fire_interval or ENEMY_TRACKING_FIRE_INTERVAL)
         # 玩家引用（用于获取当前位置）
         self._player: pygame.sprite.Sprite | None = player_sprite
 
@@ -317,6 +450,36 @@ class TrackingEnemy(Enemy):
 
         self._x += move_x
         self._y += move_y
+
+    def _do_fire(self) -> list:
+        """发射两枚粉红子弹向玩家方向"""
+
+
+        cx, cy = self.rect.centerx, self.rect.bottom
+
+        if self._player is not None:
+            dx = float(self._player.rect.centerx) - cx
+            dy = float(self._player.rect.centery) - cy
+            dist = math.hypot(dx, dy)
+            if dist < 1:
+                dx, dy = 0.0, 1.0
+                dist = 1.0
+            nx, ny = dx / dist, dy / dist
+        else:
+            nx, ny = 0.0, 1.0
+
+        bullets = []
+        for spread in (-0.2, 0.2):
+            cos_a, sin_a = math.cos(spread), math.sin(spread)
+            vx = (nx * cos_a - ny * sin_a) * 230.0
+            vy = (nx * sin_a + ny * cos_a) * 230.0
+            b = Bullet(cx, cy, BulletSource.ENEMY, direction=1,
+                       speed=230.0, style="tracking")
+            b._vx = vx
+            b._vy = vy
+            b._custom_velocity = True
+            bullets.append(b)
+        return bullets
 
 
 # ==========================================================================
@@ -479,7 +642,7 @@ class BossEnemy(Enemy):
             vx = math.cos(angle)
             speed = BOSS_BULLET_SPEED * (0.55 + 0.15 * (i % 3))
             b = Bullet(cx, cy, BulletSource.ENEMY, direction=1,
-                       speed=speed, damage=BOSS_BULLET_DAMAGE)
+                       speed=speed, damage=BOSS_BULLET_DAMAGE, style="normal")
             b._vx = vx * speed
             b._vy = vy * speed
             b._custom_velocity = True
@@ -503,8 +666,8 @@ class BossEnemy(Enemy):
             vy = math.sin(angle) * BOSS_BULLET_SPEED * 0.6
             # 排除正上方（i≈9），避免背向玩家
             b = Bullet(cx, cy, BulletSource.ENEMY, direction=1,
-                       speed=BOSS_BULLET_SPEED * 0.7, damage=BOSS_BULLET_DAMAGE)
-            # 手动覆写移动方向
+                       speed=BOSS_BULLET_SPEED * 0.7, damage=BOSS_BULLET_DAMAGE,
+                       style="elite")
             b._vx = vx
             b._vy = vy
             b._custom_velocity = True
@@ -542,7 +705,8 @@ class BossEnemy(Enemy):
             dx = base_dx * cos_a - base_dy * sin_a
             dy = base_dx * sin_a + base_dy * cos_a
             b = Bullet(cx, cy, BulletSource.ENEMY, direction=1,
-                       speed=BOSS_BULLET_SPEED * 0.8, damage=BOSS_BULLET_DAMAGE)
+                       speed=BOSS_BULLET_SPEED * 0.8, damage=BOSS_BULLET_DAMAGE,
+                       style="tracking")
             b._vx = dx * BOSS_BULLET_SPEED * 0.8
             b._vy = dy * BOSS_BULLET_SPEED * 0.8
             b._custom_velocity = True
@@ -564,7 +728,8 @@ class BossEnemy(Enemy):
         cx = self.rect.centerx
         cy = self.rect.bottom
         b = Bullet(cx, cy, BulletSource.ENEMY, direction=1,
-                   speed=BOSS_BULLET_SPEED * 0.5, damage=BOSS_BULLET_DAMAGE)
+                   speed=BOSS_BULLET_SPEED * 0.5, damage=BOSS_BULLET_DAMAGE,
+                   style="fast")
         b._vx = math.cos(self._spiral_angle) * BOSS_BULLET_SPEED * 0.6
         b._vy = abs(math.sin(self._spiral_angle)) * BOSS_BULLET_SPEED * 0.6 + BOSS_BULLET_SPEED * 0.2
         b._custom_velocity = True

@@ -330,12 +330,12 @@ class Player(pygame.sprite.DirtySprite):
 
     def fire(self) -> list[Bullet]:
         """
-        释放蓄力，按当前蓄力等级 + 道具 Buff 发射子弹。
+        释放蓄力，按当前蓄力等级 + 道具 Buff 发射子弹（⭐ 增强版：不同蓄力等级不同子弹外观）。
         ————————————————————————————————
-        基础蓄力等级 → 发射数：
-          _charge_level < 40%  → 单发
-          _charge_level 40-80% → 双发并排
-          _charge_level ≥ 80%  → 三发扇形
+        基础蓄力等级 → 发射数（子弹样式自动匹配）：
+          _charge_level < 40%  → 单发（蓝白能量尖晶 · single）
+          _charge_level 40-80% → 双发并排（金色双翼飞弹 · double）
+          _charge_level ≥ 80%  → 三发扇形（赤炎三叉戟 · triple）
 
         道具叠加效果：
           DOUBLE_DAMAGE → 子弹伤害 ×2
@@ -359,38 +359,52 @@ class Player(pygame.sprite.DirtySprite):
         base_x: float = float(self.rect.centerx)
         base_y: float = float(self.rect.top)
 
+        # 确定子弹样式（基于蓄力等级）
+        if charge >= CHARGE_THRESHOLD_TRIPLE:
+            bullet_style = "triple"
+        elif charge >= CHARGE_THRESHOLD_DOUBLE:
+            bullet_style = "double"
+        else:
+            bullet_style = "single"
+
+        def mkbullet(x, y, style=None):
+            return Bullet.create_player_bullet(
+                x=x, y=y, damage=damage, piercing=pierce,
+                style=style or bullet_style,
+            )
+
         if is_spread:
             # 三向散射 Buff：最低三发扇形，满蓄五发扇形
             if charge >= CHARGE_THRESHOLD_TRIPLE:
                 return [
-                    Bullet.create_player_bullet(x=base_x, y=base_y, damage=damage, piercing=pierce),
-                    Bullet.create_player_bullet(x=base_x - 14, y=base_y + 2, damage=damage, piercing=pierce),
-                    Bullet.create_player_bullet(x=base_x + 14, y=base_y + 2, damage=damage, piercing=pierce),
-                    Bullet.create_player_bullet(x=base_x - 7, y=base_y + 1, damage=damage, piercing=pierce),
-                    Bullet.create_player_bullet(x=base_x + 7, y=base_y + 1, damage=damage, piercing=pierce),
+                    mkbullet(base_x, base_y, style="triple"),
+                    mkbullet(base_x - 14, base_y + 2, style="double"),
+                    mkbullet(base_x + 14, base_y + 2, style="double"),
+                    mkbullet(base_x - 7, base_y + 1, style="single"),
+                    mkbullet(base_x + 7, base_y + 1, style="single"),
                 ]
             else:
                 return [
-                    Bullet.create_player_bullet(x=base_x, y=base_y, damage=damage, piercing=pierce),
-                    Bullet.create_player_bullet(x=base_x - 12, y=base_y + 2, damage=damage, piercing=pierce),
-                    Bullet.create_player_bullet(x=base_x + 12, y=base_y + 2, damage=damage, piercing=pierce),
+                    mkbullet(base_x, base_y, style="triple"),
+                    mkbullet(base_x - 12, base_y + 2, style="double"),
+                    mkbullet(base_x + 12, base_y + 2, style="double"),
                 ]
 
         if charge < CHARGE_THRESHOLD_DOUBLE:
-            return [Bullet.create_player_bullet(x=base_x, y=base_y, damage=damage, piercing=pierce)]
+            return [mkbullet(base_x, base_y, style="single")]
 
         elif charge < CHARGE_THRESHOLD_TRIPLE:
             offset: float = DOUBLE_SHOT_SPACING / 2.0
             return [
-                Bullet.create_player_bullet(x=base_x - offset, y=base_y, damage=damage, piercing=pierce),
-                Bullet.create_player_bullet(x=base_x + offset, y=base_y, damage=damage, piercing=pierce),
+                mkbullet(base_x - offset, base_y, style="double"),
+                mkbullet(base_x + offset, base_y, style="double"),
             ]
 
         else:
             return [
-                Bullet.create_player_bullet(x=base_x, y=base_y, damage=damage, piercing=pierce),
-                Bullet.create_player_bullet(x=base_x - 8, y=base_y + 2, damage=damage, piercing=pierce),
-                Bullet.create_player_bullet(x=base_x + 8, y=base_y + 2, damage=damage, piercing=pierce),
+                mkbullet(base_x, base_y, style="triple"),
+                mkbullet(base_x - 8, base_y + 2, style="double"),
+                mkbullet(base_x + 8, base_y + 2, style="double"),
             ]
 
     # ====================================================================
