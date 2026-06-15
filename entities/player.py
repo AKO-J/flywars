@@ -26,7 +26,7 @@ from settings import (
     LAYER_PLAYER,
     GRAY, YELLOW, GREEN, CYAN, WHITE, RED, BLACK,
     UI_FONT_PATH,
-    POWERUP_DURATION,
+    POWERUP_DURATION, PLAYER_MAX_BOMBS,
     PowerUpType,
     PLAYER_IMAGE_PATH,
 )
@@ -110,7 +110,9 @@ class Player(pygame.sprite.DirtySprite):
         # 道具 Buff 状态（题18）— 多个 Buff 可叠加，各自独立计时
         self._active_powerups: dict[PowerUpType, float] = {}
 
-        # ⭐ 永久升级加成（由 PlayerUpgradeSystem 设置）
+        # ⭐ 炸弹系统
+        self.bomb_count: int = 0
+        self.max_bombs: int = PLAYER_MAX_BOMBS
         self._extra_damage: int = 0       # 额外伤害
         self._spread_upgrade: int = 0     # 额外弹幕扩散数
 
@@ -609,7 +611,10 @@ class Player(pygame.sprite.DirtySprite):
                 self.hp += 1
             return "health"
         elif ptype == PowerUpType.BOMB:
-            return "bomb"
+            if self.bomb_count < self.max_bombs:
+                self.bomb_count += 1
+                return "bomb"
+            return "bomb_full"  # 炸弹已满，提示
         else:
             # 火力道具叠加：续期已有或新增独立计时
             self._active_powerups[ptype] = max(
@@ -685,6 +690,13 @@ class Player(pygame.sprite.DirtySprite):
     def toggle_hitbox_visible(self) -> None:
         """F1 切换判定点可视化"""
         self._show_hitbox = not self._show_hitbox
+
+    def use_bomb(self) -> bool:
+        """使用一颗炸弹。返回 True 表示成功使用。"""
+        if self.bomb_count > 0:
+            self.bomb_count -= 1
+            return True
+        return False
 
     def draw_hitbox(self, screen: pygame.Surface) -> None:
         """绘制判定点（调试用，F1 切換）"""

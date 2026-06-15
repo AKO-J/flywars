@@ -549,6 +549,10 @@ class Game:
             if key == pygame.K_SPACE:
                 # 由 handle_keydown 设置 _is_firing
                 self.audio.play_shoot()
+            # 使用炸弹（Q 键）
+            if key == pygame.K_q:
+                if self.player.use_bomb():
+                    self._trigger_bomb()
             # 玩家移动标记
             self.player.handle_keydown(event)
 
@@ -1164,7 +1168,13 @@ class Game:
             self.particles.pickup_glow(pu.rect.centerx, pu.rect.centery, pu_color)
 
             if result == "bomb":
-                self._trigger_bomb()
+                # ⭐ 改为仅增加炸弹库存，不再立即引爆
+                self.ui.add_floating_text(pu.rect.centerx, pu.rect.centery,
+                                          "💣 +1", color=(255, 200, 60))
+            elif result == "bomb_full":
+                # 炸弹已满，显示提示
+                self.ui.add_floating_text(pu.rect.centerx, pu.rect.centery,
+                                          "💣 MAX", color=(80, 80, 80))
             elif result == "health":
                 self.audio.play_shoot()
             elif result == "buff":

@@ -338,6 +338,13 @@ class UISystem:
         screen.blit(hp_label, (x0 + bar_w + 6, y))
         y += bar_h + 6
 
+        # ── 炸弹残弹（⭐ 新增）──
+        bomb_text = f"💣 ×{player.bomb_count}"
+        bomb_color = (255, 200, 60) if player.bomb_count > 0 else (80, 80, 80)
+        bomb_label = self._font_small.render(bomb_text, True, bomb_color)
+        screen.blit(bomb_label, (x0 + bar_w - 34, y))
+        y += 20
+
         # ── 第2行：蓄力状态 ──
         charge_pct: int = int(player.charge_level * 100)
         if charge_pct >= 80:

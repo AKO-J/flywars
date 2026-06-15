@@ -246,6 +246,8 @@ POWERUP_LIFETIME: float = 8.0              # 存活时间（秒）
 POWERUP_PULSE_SPEED: float = 4.0           # 脉冲动画频率（Hz）
 # 火力道具持续时间（秒）
 POWERUP_DURATION: float = 8.0
+# 炸弹上限（⭐ 新增：不再无限使用）
+PLAYER_MAX_BOMBS: int = 3
 
 # ---------------------- 玩家成长系统（⭐ 新增） ---------------------- #
 # 击杀经验值
