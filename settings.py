@@ -382,9 +382,9 @@ LEVEL_WAVES: dict[int, dict] = {
 }
 
 # 波次间休息时间（秒）
-WAVE_REST_DURATION: float = 2.0
+WAVE_REST_DURATION: float = 1.2  # 原2.0 → 节奏更快
 # 波次推进提示显示时间
-WAVE_ANNOUNCE_DURATION: float = 1.5
+WAVE_ANNOUNCE_DURATION: float = 1.0
 # ⭐ 阵型波次敌机生成间隔（秒）— 快速序列，让编队可见
 FORMATION_SPAWN_INTERVAL: float = 0.12
 # 飘字得分：上浮速度（像素/秒）

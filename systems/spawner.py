@@ -227,6 +227,10 @@ class Spawner:
                 # 所有波次完成 → 生成 Boss
                 elif self._has_boss:
                     new_boss = self._spawn_boss(enemy_group, all_sprites)
+                    # ⭐ Boss 出场时清除场上残留小怪
+                    for e in list(enemy_group):
+                        if not isinstance(e, BossEnemy):
+                            e.kill()
             return new_boss
 
         # ---- 波次提示显示 ----
@@ -235,6 +239,9 @@ class Spawner:
 
         # ---- 检查波次是否清空（生成队列空 + 场上无敌机） ----
         if self.wave_cleared:
+            # ⭐ 如果 Boss 已生成，不再重复触发
+            if self._boss_spawned:
+                return new_boss
             # 走完所有波次
             if self._wave_index >= self._total_waves - 1:
                 if not self._has_boss:

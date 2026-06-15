@@ -1154,16 +1154,6 @@ class Game:
         for cx, cy, bonus in self.collision.combo_bonus_texts:
             self.ui.add_pickup_text(cx, cy, f"+{bonus}", (255, 215, 80))
 
-        # ⭐ Combo 断开提示
-        if self.collision.combo_just_broke and self.collision.combo_peak >= 3:
-            sw = SCREEN_WIDTH
-            self.particles.burst(sw // 2, SCREEN_HEIGHT // 2 - 30,
-                                 count=8, speed=100, gravity=0, lifetime=0.6,
-                                 colors=[(255, 80, 80), (255, 150, 50)],
-                                 size_range=(3, 6), spread=2 * math.pi)
-            # ⭐ 断连文字
-            self.ui.add_pickup_text(sw // 2, SCREEN_HEIGHT // 2 - 50,
-                                    f"💔 Combo x{self.collision.combo_peak} 断连！", (255, 80, 80))
 
         # ⭐ 连击里程碑：30连击回血
         if self.collision.combo_milestone_heal:
