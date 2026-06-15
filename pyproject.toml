@@ -1,0 +1,104 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "flywars"
+version = "1.0.0"
+description = "一款基于 Python + Pygame 的经典纵版射击游戏"
+readme = "README.md"
+authors = [
+    { name = "AKO-J" },
+]
+license = { text = "MIT" }
+keywords = ["game", "shmup", "pygame", "shooting"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: Chinese (Simplified)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Games/Entertainment :: Arcade",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "pygame>=2.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "ruff>=0.3",
+    "pre-commit>=3.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/AKO-J/flywars"
+Source = "https://github.com/AKO-J/flywars"
+
+# 根目录项目：core/ entities/ systems/ 等都是顶层 Python 包
+[tool.setuptools.packages.find]
+include = ["core", "core.*", "entities", "entities.*", "systems", "systems.*",
+           "server", "server.*", "sprites", "sprites.*", "config", "config.*",
+           "utils", "utils.*", "tests", "tests.*", "tools"]
+namespaces = false
+
+[tool.setuptools.package-data]
+"*" = ["*.json", "*.png", "*.jpg", "*.wav", "*.ogg"]
+"assets" = ["**/*"]
+
+[tool.setuptools]
+py-modules = ["main", "settings"]
+
+# ============================================================
+# pytest
+# ============================================================
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--tb=short",
+    "--color=yes",
+]
+asyncio_mode = "auto"
+
+# ============================================================
+# Ruff — 极速 Python linter & formatter
+# ============================================================
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "YTT",  # flake8-2020
+]
+ignore = [
+    "E501",  # 行长度由 ruff formatter 管理
+    "N999",  # 模块名允许非 PEP8（如小怪.png）
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*.py" = ["N802", "N803", "N806"]  # 测试方法允许非标准命名
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
