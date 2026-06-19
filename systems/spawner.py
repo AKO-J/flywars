@@ -100,7 +100,8 @@ class Spawner:
         self._wave_spawned: int = 0      # 本波已生成敌机数
         self._wave_killed: int = 0       # 本波已消灭敌机数
         self._wave_last_spawn: float = 0.0  # 本波最后一只生成时间
-        self._wave_timeout: float = 12.0      # 安全超时（秒）
+        self._wave_timeout: float = 8.0       # 安全超时
+        self._timeout_warned: bool = False    # ⭐ 每波只警告一次
 
         # 预加载关卡1配置
         self.set_level(1)
@@ -128,6 +129,7 @@ class Spawner:
         self._boss_spawned = False
         self.kills_this_level = 0
         self._wave_announce_timer = 0.0
+        self._timeout_warned = False  # ⭐
         self._build_spawn_queue()
 
     def on_enemy_killed(self) -> None:
@@ -153,6 +155,8 @@ class Spawner:
         self._boss_spawned = False
         self.total_spawned = 0
         self.kills_this_level = 0
+        self._wave_killed = 0
+        self._timeout_warned = False
         self._alive_count = 0
         self.type_counts = {k: 0 for k in self.type_counts}
         self._wave_announce_timer = 0.0
@@ -256,7 +260,9 @@ class Spawner:
             if not all_killed and not timed_out:
                 return new_boss  # 还在等击杀，不放行
             if not all_killed and timed_out:
-                print(f"[Spawner] ⚠ 超时 {self._wave_timeout}s 强制推进 (已杀 {self._wave_killed}/{self._wave_spawned})")
+                if not self._timeout_warned:
+                    print(f"[Spawner] ⚠ 超时 {self._wave_timeout}s 强制推进 (已杀 {self._wave_killed}/{self._wave_spawned})")
+                    self._timeout_warned = True
             
             # ⭐ 如果 Boss 已生成，不再重复触发
             if self._boss_spawned:
@@ -304,6 +310,11 @@ class Spawner:
 
     def _build_spawn_queue(self) -> None:
         """生成当前波次的敌机队列（支持阵型）。"""
+        # ⭐ 新波次重置
+        self._wave_killed = 0
+        self._wave_spawned = 0
+        self._wave_last_spawn = 0.0
+        self._timeout_warned = False
         if self._wave_index >= len(self._wave_config):
             self._spawn_queue = []
             self._spawn_positions = []

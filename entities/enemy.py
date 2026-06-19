@@ -36,9 +36,8 @@ from settings import (
     ENEMY_TRACKING_WIDTH, ENEMY_TRACKING_HEIGHT,
     ENEMY_TRACKING_FIRE_INTERVAL,
     BOSS_HP, BOSS_SPEED, BOSS_SCORE, BOSS_WIDTH, BOSS_HEIGHT,
-    BOSS_FIRE_INTERVAL_CIRCLE, BOSS_FIRE_INTERVAL_AIMED, BOSS_FIRE_INTERVAL_SPIRAL,
     BOSS_ENTER_DURATION, BOSS_PATROL_MARGIN, BOSS_BULLET_DAMAGE, BOSS_BULLET_SPEED,
-    BOSS_FAN_COUNT, BOSS_FAN_ANGLE, BOSS_FAN_INTERVAL, BOSS_EXPLOSION_COUNT,
+    BOSS_EXPLOSION_COUNT,
     DIFFICULTY_HP_SCALE, DIFFICULTY_FIRE_RATE_SCALE,
     LAYER_ENEMY, LAYER_BOSS, UI_FONT_PATH,
     ENEMY_NORMAL_IMAGE_PATH, ENEMY_FAST_IMAGE_PATH,
@@ -617,6 +616,16 @@ class BossEnemy(Enemy):
         # Boss 专属颜色标记（血条使用）
         self.boss_color: tuple = (255, 60, 60)
 
+        # ⭐ 魂式招式状态机
+        self._atk_state: str = "idle"       # idle/telegraph/attack/cooldown
+        self._atk_timer: float = 0.0
+        self._atk_phase: int = 0            # 攻击进行到第几发
+        self._atk_max: int = 1              # 攻击总共发几轮
+        self._atk_next: str = ""            # 下一个招式
+        self._telegraph_x: float = 0.0      # 起手势目标位置
+        self._telegraph_y: float = 0.0
+        self._telegraph_alpha: int = 0      # 起手势闪光
+
     def set_player(self, player_sprite: pygame.sprite.Sprite) -> None:
         self._player = player_sprite
 
@@ -754,90 +763,129 @@ class BossEnemy(Enemy):
             if self._phase_transition_timer > 0.8:
                 self._phase_transitioning = False
 
-        rate_mult = self._get_phase_fire_rate_mult()
-        self._fire_timer += dt
+        self._atk_timer += dt
         bullets: list[Bullet] = []
 
-        interval = self._choose_bullet_interval()
-        if self._fire_timer >= interval:
-            self._fire_timer = 0.0
-            bullets = self._fire_selected_mode()
-            if self._fire_mode == self.MODE_SPIRAL:
-                self._spiral_angle += 0.5 * self._get_phase_speed_mult()
-                spiral_max = 8.0 * math.pi if self._combat_phase == self.PHASE_3 else 6.0 * math.pi
-                if self._spiral_angle > spiral_max:
-                    self._spiral_angle = 0.0
-                    self._fire_mode = self._choose_next_mode()
+        # ════════════════════════════════════════════════════════════
+        # ⭐ 魂式招式状态机
+        # ════════════════════════════════════════════════════════════
+
+        if self._atk_state == "idle":
+            # 选下一个招式
+            self._atk_next = self._choose_attack()
+            # 起手势：移动到目标位置 + 蓄力闪光
+            self._atk_state = "telegraph"
+            self._atk_timer = 0.0
+            self._atk_phase = 0
+            self._atk_max = self._get_attack_rounds(self._atk_next)
+            # 目标位置：中心或偏侧
+            if random.random() < 0.4:
+                self._telegraph_x = SCREEN_WIDTH // 2
+                self._telegraph_y = SCREEN_HEIGHT * 0.25
             else:
-                self._fire_mode = self._choose_next_mode()
+                left = random.choice([True, False])
+                self._telegraph_x = 100 if left else SCREEN_WIDTH - 100
+                self._telegraph_y = SCREEN_HEIGHT * 0.2
+            self._telegraph_alpha = 0
+
+        elif self._atk_state == "telegraph":
+            # 移向目标位置 + 蓄力
+            t = self._atk_timer / 1.0  # 1秒起手势
+            self._telegraph_alpha = int(150 * t)
+            # 平滑移动
+            self._x += (self._telegraph_x - self._x) * dt * 3.0
+            self.rect.centerx = int(self._x)
+            # 闪光
+            if t >= 1.0:
+                self._atk_state = "attack"
+                self._atk_timer = 0.0
+                self._atk_phase = 0
+                self._telegraph_alpha = 0
+
+        elif self._atk_state == "attack":
+            # 执行招式
+            bullets = self._fire_attack(self._atk_next, self._atk_phase)
+            if bullets:
+                self._atk_phase += 1
+            if self._atk_phase >= self._atk_max:
+                self._atk_state = "cooldown"
+                self._atk_timer = 0.0
+
+        elif self._atk_state == "cooldown":
+            # 招式后间隙
+            if self._atk_timer > 0.8:
+                self._atk_state = "idle"
+
         return bullets
 
-    def _choose_next_mode(self) -> str:
+    # ════════════════════════════════════════════════════════════════
+    # ⭐ 招式系统
+    # ════════════════════════════════════════════════════════════════
+
+    ATK_CROSS = "atk_cross"        # 十字：上下左右 4 道
+    ATK_FAN = "atk_fan"            # 扇形：朝玩家
+    ATK_CIRCLE = "atk_circle"      # 圆形：全方向
+    ATK_WALL = "atk_wall"          # 弹幕墙：连射 3 排
+
+    def _choose_attack(self) -> str:
         weights = {
-            self.MODE_FAN: 20, self.MODE_CIRCLE: 20,
-            self.MODE_AIMED: 20, self.MODE_SPIRAL: 10,
-            self.MODE_WALL: 10,
+            self.ATK_CROSS: 25, self.ATK_FAN: 25,
+            self.ATK_CIRCLE: 25, self.ATK_WALL: 25,
         }
-        if self._combat_phase in (self.PHASE_2, self.PHASE_3):
-            weights[self.MODE_CROSS] = 20
-            weights[self.MODE_SPIRAL] = 15
-            weights[self.MODE_WALL] = 15
-        if self._combat_phase == self.PHASE_3:
-            weights[self.MODE_SPIRAL] = 25
-            weights[self.MODE_CROSS] = 20
-            weights[self.MODE_WALL] = 20
-            weights[self.MODE_FAN] = 12
-        if self._player is not None:
-            dx = abs(self._player.rect.centerx - self.rect.centerx)
-            if dx < 60:
-                weights[self.MODE_AIMED] += 15
-                weights[self.MODE_SPIRAL] += 10
         return random.choices(list(weights.keys()), weights=list(weights.values()))[0]
 
-    def _choose_bullet_interval(self) -> float:
-        rate_mult = self._get_phase_fire_rate_mult()
-        intervals = {
-            self.MODE_FAN: BOSS_FAN_INTERVAL * rate_mult,
-            self.MODE_CIRCLE: BOSS_FIRE_INTERVAL_CIRCLE * rate_mult,
-            self.MODE_AIMED: BOSS_FIRE_INTERVAL_AIMED * rate_mult,
-            self.MODE_CROSS: BOSS_FIRE_INTERVAL_AIMED * rate_mult * 0.7,
-            self.MODE_SPIRAL: BOSS_FIRE_INTERVAL_SPIRAL * rate_mult,
-            self.MODE_WALL: BOSS_FAN_INTERVAL * rate_mult * 1.2,
-        }
-        return intervals.get(self._fire_mode, 0.5)
+    def _get_attack_rounds(self, atk_type: str) -> int:
+        r = {self.ATK_CROSS: 2, self.ATK_FAN: 2, self.ATK_CIRCLE: 1, self.ATK_WALL: 3}
+        return r.get(atk_type, 1)
 
-    def _fire_selected_mode(self) -> list[Bullet]:
+    def _fire_attack(self, atk_type: str, phase: int) -> list[Bullet]:
         fn = {
-            self.MODE_FAN: self._fire_fan,
-            self.MODE_CIRCLE: self._fire_circle,
-            self.MODE_AIMED: self._fire_aimed,
-            self.MODE_CROSS: self._fire_cross,
-            self.MODE_SPIRAL: self._fire_spiral,
-            self.MODE_WALL: self._fire_wall,
+            self.ATK_CROSS: self._atk_cross,
+            self.ATK_FAN: self._atk_fan,
+            self.ATK_CIRCLE: self._atk_circle,
+            self.ATK_WALL: self._atk_wall,
         }
-        return fn.get(self._fire_mode, lambda: [])()
+        return fn.get(atk_type, lambda: [])()
 
     # ════════════════════════════════════════════════════════════════
-    # 扇形弹幕 — 24发密集扇面
+    # 十字扫射：上下左右各一道
     # ════════════════════════════════════════════════════════════════
 
-    def _fire_fan(self) -> list[Bullet]:
+    def _atk_cross(self) -> list[Bullet]:
         bullets = []
         cx, cy = self.rect.centerx, self.rect.bottom
-        if self._player is not None:
+        spd = BOSS_BULLET_SPEED * 0.8
+        for angle in (0, math.pi, math.pi / 2, -math.pi / 2):
+            for i in range(8):
+                a = angle + (i - 3.5) * 0.03
+                b = Bullet(cx, cy, BulletSource.ENEMY, direction=1,
+                           speed=spd, damage=BOSS_BULLET_DAMAGE, style="elite")
+                b._vx, b._vy = math.cos(a) * spd, math.sin(a) * spd
+                b._custom_velocity = True
+                bullets.append(b)
+        return bullets
+
+    # ════════════════════════════════════════════════════════════════
+    # 扇形散射：朝玩家方向
+    # ════════════════════════════════════════════════════════════════
+
+    def _atk_fan(self) -> list[Bullet]:
+        bullets = []
+        cx, cy = self.rect.centerx, self.rect.bottom
+        if self._player:
             dx = float(self._player.rect.centerx) - cx
             dy = float(self._player.rect.centery) - cy
-            base_angle = math.atan2(dy, dx) if dy > 0 else math.pi / 2
+            base = math.atan2(dy, dx) if dy > 0 else math.pi / 2
         else:
-            base_angle = math.pi / 2
-        half_fan = math.radians(BOSS_FAN_ANGLE / 2.0)
-        n = BOSS_FAN_COUNT
-        step = (2.0 * half_fan) / max(n - 1, 1)
+            base = math.pi / 2
+        half = math.radians(50)
+        n = 20
+        step = (2 * half) / max(n - 1, 1)
+        spd = BOSS_BULLET_SPEED * 0.7
         for i in range(n):
-            angle = base_angle - half_fan + step * i
-            vy = max(math.sin(angle), 0.2)
-            vx = math.cos(angle)
-            spd = BOSS_BULLET_SPEED * random.uniform(0.6, 0.9)
+            a = base - half + step * i
+            vy = max(math.sin(a), 0.15)
+            vx = math.cos(a)
             b = Bullet(cx, cy, BulletSource.ENEMY, direction=1,
                        speed=spd, damage=BOSS_BULLET_DAMAGE, style="elite")
             b._vx, b._vy = vx * spd, vy * spd
@@ -846,110 +894,32 @@ class BossEnemy(Enemy):
         return bullets
 
     # ════════════════════════════════════════════════════════════════
-    # 圆形弹幕 — 20方向，下半圈更密
+    # 圆形散弹：全方向
     # ════════════════════════════════════════════════════════════════
 
-    def _fire_circle(self) -> list[Bullet]:
+    def _atk_circle(self) -> list[Bullet]:
         bullets = []
         cx, cy = self.rect.centerx, self.rect.bottom
-        n_lower, n_upper = 16, 4
-        for i in range(n_lower):
-            angle = math.pi * 0.1 + math.pi * 0.8 * i / max(n_lower - 1, 1)
-            spd = BOSS_BULLET_SPEED * random.uniform(0.55, 0.75)
+        n = 24
+        spd = BOSS_BULLET_SPEED * 0.6
+        for i in range(n):
+            a = 2 * math.pi * i / n
             b = Bullet(cx, cy, BulletSource.ENEMY, direction=1,
                        speed=spd, damage=BOSS_BULLET_DAMAGE, style="elite")
-            b._vx, b._vy = math.cos(angle) * spd, abs(math.sin(angle)) * spd
-            b._custom_velocity = True
-            bullets.append(b)
-        for i in range(n_upper):
-            angle = math.pi * 1.1 + math.pi * 0.8 * i / max(n_upper - 1, 1)
-            spd = BOSS_BULLET_SPEED * 0.5
-            b = Bullet(cx, cy, BulletSource.ENEMY, direction=1,
-                       speed=spd, damage=BOSS_BULLET_DAMAGE, style="fast")
-            b._vx, b._vy = math.cos(angle) * spd, -abs(math.sin(angle)) * spd
+            b._vx, b._vy = math.cos(a) * spd, math.sin(a) * spd
             b._custom_velocity = True
             bullets.append(b)
         return bullets
 
     # ════════════════════════════════════════════════════════════════
-    # 瞄准弹幕 — 6发覆盖射击
+    # 弹幕墙：水平连续排
     # ════════════════════════════════════════════════════════════════
 
-    def _fire_aimed(self) -> list[Bullet]:
-        bullets = []
-        if self._player is None:
-            return bullets
-        cx, cy = self.rect.centerx, self.rect.bottom
-        tx, ty = float(self._player.rect.centerx), float(self._player.rect.centery)
-        bdx, bdy = tx - cx, ty - cy
-        dist = max(math.sqrt(bdx * bdx + bdy * bdy), 1)
-        bdx /= dist
-        bdy /= dist
-        offsets = (-0.25, -0.12, -0.04, 0.04, 0.12, 0.25)
-        for off in offsets:
-            spd = BOSS_BULLET_SPEED * random.uniform(0.7, 0.9)
-            ca, sa = math.cos(off), math.sin(off)
-            dx, dy = bdx * ca - bdy * sa, bdx * sa + bdy * ca
-            b = Bullet(cx, cy, BulletSource.ENEMY, direction=1,
-                       speed=spd, damage=BOSS_BULLET_DAMAGE, style="tracking")
-            b._vx, b._vy = dx * spd, dy * spd
-            b._custom_velocity = True
-            bullets.append(b)
-        return bullets
-
-    # ════════════════════════════════════════════════════════════════
-    # 螺旋弹幕 — 每次2发双螺旋
-    # ════════════════════════════════════════════════════════════════
-
-    def _fire_spiral(self) -> list[Bullet]:
-        bullets = []
-        cx, cy = self.rect.centerx, self.rect.bottom
-        self._spiral_angle += 0.5 * self._get_phase_speed_mult()
-        for offset in (0, math.pi):
-            a = self._spiral_angle + offset
-            spd = BOSS_BULLET_SPEED * random.uniform(0.5, 0.7)
-            b = Bullet(cx, cy, BulletSource.ENEMY, direction=1,
-                       speed=spd, damage=BOSS_BULLET_DAMAGE, style="fast")
-            b._vx = math.cos(a) * spd * 0.7
-            b._vy = abs(math.sin(a)) * spd * 0.7 + spd * 0.2
-            b._custom_velocity = True
-            bullets.append(b)
-        return bullets
-
-    # ════════════════════════════════════════════════════════════════
-    # 交叉弹幕 — 每线10发快速旋转
-    # ════════════════════════════════════════════════════════════════
-
-    def _fire_cross(self) -> list[Bullet]:
-        bullets = []
-        cx, cy = self.rect.centerx, self.rect.bottom
-        self._cross_angle += 0.25 * self._get_phase_speed_mult()
-        n = 10
-        spd = BOSS_BULLET_SPEED * 0.7 * self._get_phase_speed_mult()
-        for side in (0, 1):
-            off = side * math.pi
-            for i in range(n):
-                spread = (i - (n - 1) / 2) * 0.06
-                a = self._cross_angle + off + spread
-                vx = math.cos(a) * spd
-                vy = max(math.sin(a) * spd, spd * 0.05)
-                b = Bullet(cx, cy, BulletSource.ENEMY, direction=1,
-                           speed=spd, damage=BOSS_BULLET_DAMAGE, style="elite")
-                b._vx, b._vy = vx, vy
-                b._custom_velocity = True
-                bullets.append(b)
-        return bullets
-
-    # ════════════════════════════════════════════════════════════════
-    # ⭐ 弹幕墙 — 水平一排扫过屏幕
-    # ════════════════════════════════════════════════════════════════
-
-    def _fire_wall(self) -> list[Bullet]:
-        """弹幕墙：覆盖整个宽度的水平子弹排。"""
+    def _atk_wall(self) -> list[Bullet]:
         bullets = []
         cy = self.rect.bottom
-        n = 20
         spd = BOSS_BULLET_SPEED * 0.5
+        n = 18
         for i in range(n):
             x = (i + 0.5) * SCREEN_WIDTH / n
             b = Bullet(int(x), int(cy), BulletSource.ENEMY, direction=1,
@@ -957,21 +927,7 @@ class BossEnemy(Enemy):
             b._vx, b._vy = 0, spd
             b._custom_velocity = True
             bullets.append(b)
-        if self._combat_phase in (self.PHASE_2, self.PHASE_3):
-            for i in range(n):
-                x = (i + 0.5) * SCREEN_WIDTH / n + SCREEN_WIDTH / n / 2
-                if x > SCREEN_WIDTH:
-                    continue
-                b = Bullet(int(x), int(cy - 20), BulletSource.ENEMY, direction=1,
-                           speed=spd * 0.85, damage=BOSS_BULLET_DAMAGE, style="normal")
-                b._vx, b._vy = 0, spd * 0.85
-                b._custom_velocity = True
-                bullets.append(b)
         return bullets
-
-    # ================================================================
-    # Boss 血条绘制（增强：显示战斗阶段）
-    # ================================================================
 
     def draw_hp_bar(self, screen: pygame.Surface) -> None:
         """在屏幕顶部居中绘制 Boss 血条，含战斗阶段标记和颜色变化。"""
@@ -993,11 +949,18 @@ class BossEnemy(Enemy):
         name_rect = name_surf.get_rect(center=(bar_x + bar_w // 2, bar_y - 8))
         screen.blit(name_surf, name_rect)
 
-        # ⭐ 阶段过渡闪屏（Phase 切换时的白色闪光）
-        if self._phase_transitioning:
+        # ⭐ 阶段过渡闪屏 + ⭐ 起手势光芒
+        if self._phase_transitioning and self._phase_flash_alpha > 0:
             flash_surf = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
             flash_surf.fill((255, 255, 255, min(255, int(self._phase_flash_alpha))))
             screen.blit(flash_surf, (0, 0))
+        if self._telegraph_alpha > 0:
+            r = self.rect.width
+            glow = pygame.Surface((r * 3, r * 3), pygame.SRCALPHA)
+            for i in range(5, 0, -1):
+                a = max(1, self._telegraph_alpha // (i * 2))
+                pygame.draw.circle(glow, (255, 100, 50, a), (r * 3 // 2, r * 3 // 2), r + i * 8, 2)
+            screen.blit(glow, self.rect.move(-r, -r))
 
         # 背景（暗槽）
         pygame.draw.rect(screen, (20, 20, 20), (bar_x - 1, bar_y - 1, bar_w + 2, bar_h + 2))

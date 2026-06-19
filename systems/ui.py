@@ -395,6 +395,21 @@ class UISystem:
         screen.blit(score_surf, (x0, y))
         y += 26
 
+        # ── ⭐ 第3.5行：XP 经验条 ──
+        xp_pct = min(1.0, xp_current / max(xp_next, 1))
+        xp_bar_w = bar_w
+        xp_bar_h = 8
+        pygame.draw.rect(screen, (15, 15, 25), (x0, y, xp_bar_w, xp_bar_h))
+        if xp_pct > 0:
+            pygame.draw.rect(screen, (100, 200, 255),
+                           (x0, y, int(xp_bar_w * xp_pct), xp_bar_h))
+        pygame.draw.rect(screen, (60, 60, 80), (x0, y, xp_bar_w, xp_bar_h), 1)
+        xp_label = self._font_small.render(
+            f"XP {xp_current}/{xp_next}", True, (150, 210, 255)
+        )
+        screen.blit(xp_label, (x0 + xp_bar_w + 4, y - 1))
+        y += 14
+
         # ── 第4行：关卡（真实波次）──
         level_color = ACCENT_CYAN if self._level_up_timer > 0 else TEXT_NORMAL
         if has_boss and current_wave >= total_waves - 1:

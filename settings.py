@@ -74,9 +74,9 @@ PLAYER_CHARGE_MULT_PER_UPGRADE: float = 0.85
 # Shift加速倍率（按住 Shift 时速度 = PLAYER_SPEED × 此值）
 PLAYER_BOOST_MULTIPLIER: float = 1.8
 # 玩家飞机初始生命值
-PLAYER_MAX_HP: int = 5
+PLAYER_MAX_HP: int = 8               # 原5→开局更耐打
 # 玩家受伤后无敌时间（秒），防止连续扣血
-PLAYER_INVINCIBLE_TIME: float = 1.5
+PLAYER_INVINCIBLE_TIME: float = 2.0    # 原1.5→受击后更长的无敌时间
 # 敌机碰撞伤害
 ENEMY_COLLISION_DAMAGE: int = 1
 # 玩家飞机显示尺寸（原始美术资源 405×418，等比缩放至以下尺寸）
@@ -100,7 +100,7 @@ BACKGROUND_LAYERS: list[tuple[int, int, int, float, int, int]] = [
 # 玩家子弹速度（像素/秒，Delta-Time驱动）
 PLAYER_BULLET_SPEED: float = 550.0       # 原500 → 更快
 # 玩家子弹伤害
-PLAYER_BULLET_DAMAGE: int = 1
+PLAYER_BULLET_DAMAGE: int = 2          # 原1→输出翻倍，Boss也能打动
 # 玩家子弹尺寸（⭐ 单发子弹更大更帅）
 PLAYER_BULLET_WIDTH: int = 8             # 原4 → 加宽
 PLAYER_BULLET_HEIGHT: int = 20           # 原14 → 加长
@@ -197,7 +197,7 @@ BOSS_PATROL_MARGIN: int = 60
 # Boss 子弹伤害
 BOSS_BULLET_DAMAGE: int = 1
 # Boss 子弹速度（像素/秒）⭐ 原220→350，弹幕才够紧迫
-BOSS_BULLET_SPEED: float = 350.0
+BOSS_BULLET_SPEED: float = 200.0    # 再降，给AI和玩家反应时间
 # Boss 扇形弹幕（题19）
 BOSS_FAN_COUNT: int = 24                  # 原16 → 更多弹头
 BOSS_FAN_ANGLE: float = 100.0             # 原120° → 收窄更密集

@@ -26,7 +26,7 @@ from settings import (
     BOSS_EXPLOSION_DELAY, FINAL_BOSS_LEVEL,
 )
 from entities.player import Player
-from entities.bullet import Bullet
+from entities.bullet import Bullet, BulletSource
 from sprites.explosion import Explosion
 from entities.enemy import BossEnemy, NormalEnemy, FastEnemy, EliteEnemy, TrackingEnemy
 from sprites.powerup import PowerUp
@@ -55,6 +55,8 @@ from sprites.particles import ParticleEmitter
 from systems.replay import ReplayRecorder, ReplayPlayer
 # ⭐ 性能分析工具
 from systems.profiler import FrameProfiler
+# ⭐ AI 自动驾驶
+from systems.ai_player import AIPlayer, AIState
 # ⭐ 玩家成长系统
 from systems.player_upgrades import (
     PlayerUpgradeData, load_upgrades, save_upgrades,
@@ -260,6 +262,13 @@ class Game:
         # ---- ⭐ 性能分析工具 ----
         self._profiler: FrameProfiler = FrameProfiler()
 
+        # ---- ⭐ AI 自动驾驶 ----
+        self._ai_player: AIPlayer | None = None
+        self._ai_mode: bool = False
+        self._fast_mode: bool = False
+        # ---- ⭐ 倍速模式 ----
+        self._speed_mult: int = 1   # 1x, 2x, 3x
+
         # ---- 脏矩形背景回调（LayeredDirty.clear 使用）----
         self._bg_callback: BackgroundCallback = BackgroundCallback(self.background)
 
@@ -408,6 +417,11 @@ class Game:
         if key == pygame.K_RETURN and self.state in (GameState.PLAYING, GameState.MENU):
             self._chat_input_active = True
             self._chat_input_buffer = ""
+            return
+        # ⭐ F12 倍速切换
+        if key == pygame.K_F12:
+            self._speed_mult = {1: 2, 2: 3, 3: 1}.get(self._speed_mult, 1)
+            print(f"[SPEED] {self._speed_mult}x 倍速")
             return
         # Tab 键快速切换频道（不在输入模式时）
         if key == pygame.K_TAB and self.state in (GameState.PLAYING, GameState.MENU):
@@ -622,7 +636,7 @@ class Game:
                 self.collision.current_level = 9
                 self._level_transition_text = "—— 无尽模式 ——"
                 self._level_transition_alpha = 200
-                self._level_transition_timer = 2.5
+                self._level_transition_timer = 0.6   # 过渡时间（秒），闪一下即过
                 self._level_transition_scale = 0.0
                 self.audio.start_bgm()
                 return
@@ -650,6 +664,61 @@ class Game:
                             self.state = GameState.MENU  # 都用完了，直接回菜单
             elif key == pygame.K_ESCAPE or key == pygame.K_q:
                 self.state = GameState.MENU  # 直接回菜单，无需再次清理
+
+    # ════════════════════════════════════════════════════════════════
+    # ⭐ AI 自动驾驶模式
+    # ════════════════════════════════════════════════════════════════
+
+    def start_ai_mode(self) -> None:
+        self._ai_mode = True
+        self._ai_player = AIPlayer("ai_test_log.txt")
+        # ⭐ AI 模式自动开始游戏（跳过菜单）
+        self._start_game()
+        print("[AI] 自动驾驶模式已启动，自动开始游戏")
+
+    def set_fast_mode(self) -> None:
+        self._fast_mode = True
+        print("[AI] 快速模式（跳过渲染，×10 倍速）")
+
+    def get_ai_player(self) -> 'AIPlayer | None':
+        return self._ai_player
+
+    def _ai_input(self) -> None:
+        if not self._ai_player or not self._ai_mode:
+            return
+        s = AIState(
+            player_x=float(self.player.rect.centerx),
+            player_y=float(self.player.rect.centery),
+            player_hp=self.player.hp,
+            player_max_hp=self.player.max_hp,
+            player_w=self.player.rect.width,
+            player_h=self.player.rect.height,
+            screen_w=SCREEN_WIDTH,
+            screen_h=SCREEN_HEIGHT,
+            enemies=[(e.rect.centerx, e.rect.centery, e.rect.width, e.rect.height)
+                     for e in self.enemies if e.alive()],
+            enemy_bullets=[(b.rect.centerx, b.rect.centery,
+                           getattr(b, '_vx', 0), getattr(b, '_vy', 0))
+                          for b in self.bullets
+                          if b.alive() and b.source != BulletSource.PLAYER],
+            powerups=[(p.rect.centerx, p.rect.centery) for p in self.powerups if p.alive()],
+            boss_active=(self._boss is not None and self._boss.alive()),
+            boss_x=float(self._boss.rect.centerx) if self._boss and self._boss.alive() else 0,
+            boss_y=float(self._boss.rect.centery) if self._boss and self._boss.alive() else 0,
+            boss_hp_pct=(self._boss.hp / max(self._boss.max_hp, 1))
+                        if self._boss and self._boss.alive() else 0,
+            level=self.spawner.level,
+            score=self.collision.score,
+            combo=self.collision.combo_count,
+            kills_this_frame=self.collision.kills_this_frame,
+        )
+        a = self._ai_player.update(s)
+        self.player.move_left = a["move_left"]
+        self.player.move_right = a["move_right"]
+        self.player.move_up = a["move_up"]
+        self.player.move_down = a["move_down"]
+        if a["shoot"]:
+            self.player._is_firing = True
 
     # ════════════════════════════════════════════════════════════════
     # ⭐ 游戏手柄支持
@@ -931,20 +1000,20 @@ class Game:
         # ⭐ 关卡通提示动画
         if self._level_transition_timer > 0:
             self._level_transition_timer -= self.dt
-            # 透明度：先闪入再渐出
-            if self._level_transition_timer > 2.0:
+            # 透明度：先闪入再渐出（总计1.5s）
+            if self._level_transition_timer > 0.35:
                 self._level_transition_alpha = min(200,
-                    self._level_transition_alpha + self.dt * 300)
-            elif self._level_transition_timer < 1.5:
+                    self._level_transition_alpha + self.dt * 500)
+            elif self._level_transition_timer < 0.3:
                 self._level_transition_alpha = max(0,
-                    self._level_transition_alpha - self.dt * 150)
+                    self._level_transition_alpha - self.dt * 250)
             # 文字缩放动画：从 0 → 1.2 → 1.0
-            if self._level_transition_timer > 2.0:
+            if self._level_transition_timer > 0.35:
                 self._level_transition_scale = min(1.2,
-                    self._level_transition_scale + self.dt * 1.5)
+                    self._level_transition_scale + self.dt * 4.0)
             else:
                 self._level_transition_scale = max(0.8,
-                    self._level_transition_scale - self.dt * 0.3)
+                    self._level_transition_scale - self.dt * 0.7)
             if self._level_transition_timer <= 0:
                 self._level_transition_timer = 0
                 self._level_transition_alpha = 0
@@ -1014,9 +1083,10 @@ class Game:
                     for b in list(self.bullets): b.kill()
                     self.spawner.set_level(9)
                     self.collision.current_level = 9
+                    self.player.hp = self.player.max_hp  # ⭐ 无尽轮回回血
                     self._level_transition_text = f"—— 无尽 第{self._endless_round}轮 ——"
                     self._level_transition_alpha = 200
-                    self._level_transition_timer = 2.5
+                    self._level_transition_timer = 0.6   # 过渡时间（秒），闪一下即过
                     self._level_transition_scale = 0.0
                     self._screen_shake = max(self._screen_shake, 4.0)
                     # 通知 spawner 无尽轮次（用于难度缩放）
@@ -1030,6 +1100,8 @@ class Game:
                     b.kill()
                 self.spawner.set_level(new_level)
                 self.collision.current_level = new_level  # ⭐ 同步关卡到碰撞系统
+                # ⭐ 升关回血：每过一关回满血
+                self.player.hp = self.player.max_hp
                 self._event_bus.publish(Event(GameEvent.LEVEL_UP, {
                     "level": new_level, "score": self.collision.score,
                 }))
@@ -1039,7 +1111,7 @@ class Game:
                     gl.info("背景主题切换", level=new_level,
                             theme=self.background.current_theme.name)
                 self._level_transition_alpha = 200
-                self._level_transition_timer = 2.5
+                self._level_transition_timer = 0.6   # 过渡时间（秒），闪一下即过
                 self._level_transition_text = f"—— 第 {new_level} 关 ——"
                 self._level_transition_scale = 0.0
                 self._screen_shake = max(self._screen_shake, 4.0)
@@ -1062,6 +1134,10 @@ class Game:
             float(self.player.rect.centerx),
             float(self.player.rect.bottom),
         )
+
+        # ⭐ AI 输入接管（必须在 player 移动之前）
+        if self._ai_mode:
+            self._ai_input()
 
         # ⭐ 手柄输入处理（每帧更新）
         self._handle_joystick()
@@ -1179,9 +1255,13 @@ class Game:
             # 粒子火花（伤害越大火花越多）
             intensity = "big" if dmg >= 3 else "normal"
             self.particles.hit_spark(sx, sy, intensity)
-            # 屏幕震动随伤害增加
-            shake = min(3.0, 0.5 + dmg * 0.4)
+            # 屏幕震动随伤害增加（⭐增强）
+            shake = min(5.0, 1.0 + dmg * 0.6)
             self._screen_shake = max(self._screen_shake, shake)
+            # 额外白色闪光粒子增强打击感
+            self.particles.burst(sx, sy, count=2, speed=40, lifetime=0.2,
+                                 colors=[(255, 255, 255)], size_range=(1, 2),
+                                 gravity=0, spread=math.pi * 2)
             # 未击杀时显示伤害数字
             if not killed and dmg > 0:
                 self.ui.add_pickup_text(sx, sy, f"-{dmg}", color=(255, 200, 100))
@@ -2707,11 +2787,36 @@ class Game:
             self.update()
             self._profiler.end_section()
 
+            # ⭐ AI 模式：死亡自动重开 + 高速运行 + 打完Boss自停
+            if self._ai_mode:
+                if self.state == GameState.GAME_OVER:
+                    if self._ai_player:
+                        self._ai_player.on_death()
+                    # ⭐ 从当前关复活，不回第1关
+                    checkpoint = self.spawner.level
+                    self._start_game()
+                    self.spawner.set_level(checkpoint)
+                    self.collision.current_level = checkpoint
+                    continue
+                # 自停：Boss击败（等级>5）或超时（180秒）
+                if self.spawner.level > 5 or self._ai_player.elapsed() > 180:
+                    if self._ai_player:
+                        reason = "Boss已击败" if self.spawner.level > 5 else "超时"
+                        self._ai_player.log("DONE", reason)
+                    self.running = False
+                    continue
+                if self._fast_mode:
+                    self.clock.tick(600)
+                    self.dt = 0.016
+                    self._profiler.end_frame()
+                    continue
+
             self._profiler.begin_section("render")
             self.render()
             self._profiler.end_section()
 
-            delta_ms: float = self.clock.tick(FPS)
+            fps = FPS * self._speed_mult  # ⭐ 倍速
+            delta_ms: float = self.clock.tick(fps)
             self.dt = delta_ms / 1000.0
 
             # ⭐ 性能分析：结束帧
@@ -2719,6 +2824,8 @@ class Game:
         self.network.stop()
 
     def quit(self) -> None:
+        if self._ai_player:
+            self._ai_player.close()
         self.network.stop()
         pygame.quit()
         sys.exit(0)

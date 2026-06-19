@@ -14,31 +14,29 @@ EnemyWaveType = Literal["normal", "fast", "elite", "tracking"]
 FINAL_BOSS_LEVEL: int = 9
 
 # 波次间休息时间（秒）
-WAVE_REST_DURATION: float = 1.2
+WAVE_REST_DURATION: float = 0.6      # 原1.2→加快波间节奏
 # 波次推进提示显示时间
-WAVE_ANNOUNCE_DURATION: float = 1.0
+WAVE_ANNOUNCE_DURATION: float = 0.5   # 原1.0→缩短提示
 
 # ═══════════════════════════════════════════════════════════════════
 # 关卡波次定义
 # ═══════════════════════════════════════════════════════════════════
 
 LEVEL_WAVES: dict[int, dict] = {
-    1: {  # 入门关 — 横排入门
+    1: {  # 入门关 — 2波快速入门
         "waves": [
-            {"units": [("normal", 3)], "formation": "line"},
             {"units": [("normal", 4)], "formation": "line"},
-            {"units": [("normal", 3), ("fast", 1)], "formation": "vshape"},
+            {"units": [("normal", 3), ("fast", 2)], "formation": "vshape"},
         ],
-        "spawn_interval": 0.9,
+        "spawn_interval": 0.48,  # 原0.9 → 更快
         "has_boss": False,
     },
-    2: {  # 引入快速敌机 — 三角+V形
+    2: {  # 快速敌机 — 2波
         "waves": [
-            {"units": [("normal", 4)], "formation": "line"},
-            {"units": [("normal", 3), ("fast", 2)], "formation": "triangle"},
             {"units": [("normal", 4), ("fast", 2)], "formation": "vshape"},
+            {"units": [("normal", 3), ("fast", 3)], "formation": "triangle"},
         ],
-        "spawn_interval": 0.8,
+        "spawn_interval": 0.42,  # 原0.8 → 更快
         "has_boss": False,
     },
     3: {  # 引入精英敌机
@@ -48,7 +46,7 @@ LEVEL_WAVES: dict[int, dict] = {
             {"units": [("normal", 4), ("fast", 3)], "formation": "vshape"},
             {"units": [("normal", 5), ("fast", 2), ("elite", 1)], "formation": "cross"},
         ],
-        "spawn_interval": 0.7,
+        "spawn_interval": 0.45,
         "has_boss": False,
     },
     4: {  # 引入追踪敌机
@@ -58,7 +56,7 @@ LEVEL_WAVES: dict[int, dict] = {
             {"units": [("normal", 4), ("fast", 3), ("elite", 1)], "formation": "arc"},
             {"units": [("normal", 5), ("fast", 3), ("tracking", 1)], "formation": "cross"},
         ],
-        "spawn_interval": 0.65,
+        "spawn_interval": 0.42,
         "has_boss": False,
     },
     5: {  # ⭐ 首个 Boss 战
@@ -68,7 +66,7 @@ LEVEL_WAVES: dict[int, dict] = {
             {"units": [("normal", 4), ("fast", 3), ("elite", 2)], "formation": "triangle"},
             {"units": [("normal", 6), ("fast", 3), ("tracking", 1)], "formation": "surround"},
         ],
-        "spawn_interval": 0.6,
+        "spawn_interval": 0.39,
         "has_boss": True,
     },
     6: {  # 战间期 — 混合编队
@@ -79,7 +77,7 @@ LEVEL_WAVES: dict[int, dict] = {
             {"units": [("normal", 5), ("fast", 3), ("tracking", 2)], "formation": "arc"},
             {"units": [("normal", 6), ("fast", 4), ("elite", 1), ("tracking", 1)], "formation": "surround"},
         ],
-        "spawn_interval": 0.55,
+        "spawn_interval": 0.36,
         "has_boss": False,
     },
     7: {  # 高密度 — 全阵型展示
@@ -90,7 +88,7 @@ LEVEL_WAVES: dict[int, dict] = {
             {"units": [("normal", 5), ("fast", 4), ("elite", 2), ("tracking", 2)], "formation": "cross"},
             {"units": [("normal", 8), ("fast", 5), ("elite", 2)], "formation": "surround"},
         ],
-        "spawn_interval": 0.5,
+        "spawn_interval": 0.32,
         "has_boss": False,
     },
     8: {  # 最终关前哨
@@ -101,7 +99,7 @@ LEVEL_WAVES: dict[int, dict] = {
             {"units": [("normal", 8), ("fast", 4), ("elite", 3), ("tracking", 2)], "formation": "arc"},
             {"units": [("normal", 10), ("fast", 5), ("elite", 3), ("tracking", 2)], "formation": "surround"},
         ],
-        "spawn_interval": 0.45,
+        "spawn_interval": 0.30,
         "has_boss": False,
     },
     9: {  # ⭐ 最终 Boss 战
@@ -113,7 +111,7 @@ LEVEL_WAVES: dict[int, dict] = {
             {"units": [("normal", 10), ("fast", 6), ("elite", 4), ("tracking", 3)], "formation": "surround"},
             {"units": [("normal", 8), ("fast", 6), ("elite", 4), ("tracking", 3)], "formation": "cross"},
         ],
-        "spawn_interval": 0.4,
+        "spawn_interval": 0.26,
         "has_boss": True,
         "final": True,
     },
