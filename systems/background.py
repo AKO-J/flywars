@@ -56,17 +56,18 @@ class Star:
             screen.set_at((int(self.x), int(self.y)), self.color)
         else:
             pygame.draw.circle(screen, self.color, (int(self.x), int(self.y)), self.size)
-            # ⭐ 大星星加柔光
-            if self.size >= 3:
-                glow_size = self.size * 4
-                glow = pygame.Surface((glow_size, glow_size), pygame.SRCALPHA)
-                for i in range(self.size * 2, 0, -1):
-                    a = max(1, int(18 - i * 1.5))
-                    r2 = i // 2
-                    if r2 > 0:
-                        pygame.draw.circle(glow, (*self.color[:3], a),
-                                         (self.size * 2, self.size * 2), r2)
-                screen.blit(glow, (int(self.x) - self.size * 2, int(self.y) - self.size * 2))
+            # ⭐ 大星星加柔光（缓存，不每帧重建）
+            if self.size >= 5:
+                if not hasattr(self, '_glow_surf'):
+                    gs = self.size * 3
+                    self._glow_surf = pygame.Surface((gs, gs), pygame.SRCALPHA)
+                    for i in range(gs // 2, 0, -1):
+                        a = max(1, 15 - i)
+                        if a > 0:
+                            pygame.draw.circle(self._glow_surf, (*self.color[:3], a),
+                                             (gs // 2, gs // 2), i // 2)
+                screen.blit(self._glow_surf, (int(self.x) - self._glow_surf.get_width() // 2,
+                                              int(self.y) - self._glow_surf.get_height() // 2))
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -399,9 +400,8 @@ class ScrollingBackground:
         self._shooting_stars = [ShootingStar() for _ in range(2)]
         # ⭐ 多天体：3-4 个不同深度
         self._celestial_bodies = [
-            CelestialBody(theme.accent_color, depth=d)
-            for d in range(3)
-        ]
+            CelestialBody(theme.accent_color, depth=0)
+        ]  # ⭐ 只1个天体，省性能
 
     def _build_from_theme(self, theme):
         layers = []

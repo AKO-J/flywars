@@ -1128,12 +1128,15 @@ class Game:
             self.bullets.add(b)
             self.all_sprites.add(b)
 
-        # ⭐ 引擎尾焰粒子（玩家底部中心）
-        self.particles.set_engine(
-            True,
-            float(self.player.rect.centerx),
-            float(self.player.rect.bottom),
-        )
+        # ⭐ 引擎尾焰粒子（仅AI快速模式显示，人类模式关闭省性能）
+        if self._fast_mode:
+            self.particles.set_engine(
+                True,
+                float(self.player.rect.centerx),
+                float(self.player.rect.bottom),
+            )
+        else:
+            self.particles.set_engine(False)
 
         # ⭐ AI 输入接管（必须在 player 移动之前）
         if self._ai_mode:

@@ -168,7 +168,7 @@ class ParticleEmitter:
       emitter.draw(screen)
     """
 
-    MAX_PARTICLES: int = 500  # 粒子池上限
+    MAX_PARTICLES: int = 200  # 原500→省性能
 
     def __init__(self) -> None:
         self._particles: list[Particle] = []

@@ -956,10 +956,17 @@ class BossEnemy(Enemy):
             screen.blit(flash_surf, (0, 0))
         if self._telegraph_alpha > 0:
             r = self.rect.width
-            glow = pygame.Surface((r * 3, r * 3), pygame.SRCALPHA)
-            for i in range(5, 0, -1):
-                a = max(1, self._telegraph_alpha // (i * 2))
-                pygame.draw.circle(glow, (255, 100, 50, a), (r * 3 // 2, r * 3 // 2), r + i * 8, 2)
+            # ⭐ 缓存 telegraph glow surface
+            if not hasattr(self, '_telegraph_glow') or self._telegraph_glow_r != r:
+                self._telegraph_glow = pygame.Surface((r * 3, r * 3), pygame.SRCALPHA)
+                self._telegraph_glow_r = r
+                for i in range(5, 0, -1):
+                    a = max(1, 255 // (i * 2))
+                    pygame.draw.circle(self._telegraph_glow, (255, 100, 50, a),
+                                      (r * 3 // 2, r * 3 // 2), r + i * 8, 2)
+            # 调节透明度
+            glow = self._telegraph_glow.copy()
+            glow.set_alpha(self._telegraph_alpha)
             screen.blit(glow, self.rect.move(-r, -r))
 
         # 背景（暗槽）
