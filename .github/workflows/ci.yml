@@ -43,7 +43,7 @@ jobs:
             **/*.py
 
       - name: Run ruff check
-        if: steps.changed-python-files.outputs.all_changed_and_modified_files_count != '0'
+        if: steps.changed-python-files.outputs.all_changed_and_modified_files_count > 0
         run: |
           python - <<'PY'
           import json, subprocess
@@ -52,7 +52,7 @@ jobs:
           PY
 
       - name: Run ruff format check
-        if: steps.changed-python-files.outputs.all_changed_and_modified_files_count != '0'
+        if: steps.changed-python-files.outputs.all_changed_and_modified_files_count > 0
         run: |
           python - <<'PY'
           import json, subprocess
