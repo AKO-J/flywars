@@ -60,10 +60,6 @@ jobs:
           subprocess.check_call(["ruff", "format", "--check", *files])
           PY
 
-      - name: Skip lint when no Python files changed
-        if: steps.changed-python-files.outputs.any_changed != 'true'
-        run: echo "No Python files changed; skipping Ruff checks."
-
   test:
     name: Test (Python ${{ matrix.python-version }}, ${{ matrix.os }})
     needs: lint
