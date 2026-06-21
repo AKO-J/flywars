@@ -43,24 +43,20 @@ jobs:
             **/*.py
 
       - name: Run ruff check
-        if: steps.changed-python-files.outputs.any_changed == 'true'
+        if: steps.changed-python-files.outputs.all_changed_and_modified_files_count != '0'
         run: |
           python - <<'PY'
           import json, subprocess
           files = json.loads(r'''${{ steps.changed-python-files.outputs.all_changed_and_modified_files_json }}''')
-          if not files:
-              raise SystemExit(0)
           subprocess.check_call(["ruff", "check", "--output-format=github", *files])
           PY
 
       - name: Run ruff format check
-        if: steps.changed-python-files.outputs.any_changed == 'true'
+        if: steps.changed-python-files.outputs.all_changed_and_modified_files_count != '0'
         run: |
           python - <<'PY'
           import json, subprocess
           files = json.loads(r'''${{ steps.changed-python-files.outputs.all_changed_and_modified_files_json }}''')
-          if not files:
-              raise SystemExit(0)
           subprocess.check_call(["ruff", "format", "--check", *files])
           PY
 
