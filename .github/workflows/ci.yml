@@ -44,11 +44,21 @@ jobs:
 
       - name: Run ruff check
         if: steps.changed-python-files.outputs.any_changed == 'true'
-        run: ruff check --output-format=github ${{ steps.changed-python-files.outputs.all_changed_files }}
+        run: |
+          python - <<'PY'
+          import json, subprocess
+          files = json.loads(r'''${{ steps.changed-python-files.outputs.all_changed_files_json }}''')
+          subprocess.check_call(["ruff", "check", "--output-format=github", *files])
+          PY
 
       - name: Run ruff format check
         if: steps.changed-python-files.outputs.any_changed == 'true'
-        run: ruff format --check ${{ steps.changed-python-files.outputs.all_changed_files }}
+        run: |
+          python - <<'PY'
+          import json, subprocess
+          files = json.loads(r'''${{ steps.changed-python-files.outputs.all_changed_files_json }}''')
+          subprocess.check_call(["ruff", "format", "--check", *files])
+          PY
 
       - name: Skip lint when no Python files changed
         if: steps.changed-python-files.outputs.any_changed != 'true'
