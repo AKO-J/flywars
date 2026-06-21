@@ -46,18 +46,30 @@ jobs:
         if: ${{ fromJSON(steps.changed-python-files.outputs.all_changed_and_modified_files_count) > 0 }}
         run: |
           python - <<'PY'
-          import json, subprocess
-          files = json.loads(r'''${{ steps.changed-python-files.outputs.all_changed_and_modified_files_json }}''')
-          subprocess.check_call(["ruff", "check", "--output-format=github", *files])
+          import json
+          import subprocess
+
+          try:
+              files = json.loads(r'''${{ steps.changed-python-files.outputs.all_changed_and_modified_files_json }}''')
+          except json.JSONDecodeError as exc:
+              raise SystemExit(f"Failed to parse changed Python files JSON: {exc}") from exc
+
+          subprocess.run(["ruff", "check", "--output-format=github", *files], check=True)
           PY
 
       - name: Run ruff format check
         if: ${{ fromJSON(steps.changed-python-files.outputs.all_changed_and_modified_files_count) > 0 }}
         run: |
           python - <<'PY'
-          import json, subprocess
-          files = json.loads(r'''${{ steps.changed-python-files.outputs.all_changed_and_modified_files_json }}''')
-          subprocess.check_call(["ruff", "format", "--check", *files])
+          import json
+          import subprocess
+
+          try:
+              files = json.loads(r'''${{ steps.changed-python-files.outputs.all_changed_and_modified_files_json }}''')
+          except json.JSONDecodeError as exc:
+              raise SystemExit(f"Failed to parse changed Python files JSON: {exc}") from exc
+
+          subprocess.run(["ruff", "format", "--check", *files], check=True)
           PY
 
   test:
