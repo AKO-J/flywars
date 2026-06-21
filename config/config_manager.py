@@ -11,8 +11,8 @@
 """
 from __future__ import annotations
 
-import json
 import copy
+import json
 from pathlib import Path
 from typing import Any
 
@@ -107,7 +107,7 @@ class ConfigManager:
             print(f"[Config] 文件不存在: {path.name}，使用空配置")
             return {}
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             if not isinstance(data, dict):
                 print(f"[Config] {path.name} 格式错误（非 JSON 对象），使用空配置")

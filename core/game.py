@@ -14,23 +14,22 @@
 不同状态渲染不同界面：菜单画面 / 游戏画面 / 暂停遮罩 / 结束画面。
 """
 
-import sys
-import math
 import collections
+import math
+import sys
 import pygame
 from settings import (
     SCREEN_WIDTH, SCREEN_HEIGHT, GAME_TITLE, FPS,
-    BLACK, WHITE, YELLOW, RED, GREEN, CYAN, GRAY, ORANGE,
-    UI_FONT_PATH, GameState, LEVEL_SCORE_BASE,
+    BLACK, WHITE, YELLOW, RED, GREEN, CYAN, ORANGE,
+    UI_FONT_PATH, GameState, PowerUpType,
     FPS_SAMPLE_WINDOW, PERF_TEST_ENEMY_COUNT,
     BOSS_EXPLOSION_DELAY, FINAL_BOSS_LEVEL,
 )
 from entities.player import Player
-from entities.bullet import Bullet, BulletSource
+from entities.bullet import BulletSource
 from sprites.explosion import Explosion
 from entities.enemy import BossEnemy, NormalEnemy, FastEnemy, EliteEnemy, TrackingEnemy
 from sprites.powerup import PowerUp
-from settings import PowerUpType
 from systems.background import ScrollingBackground, BackgroundCallback
 from systems.spawner import Spawner
 from systems.collision import CollisionSystem
