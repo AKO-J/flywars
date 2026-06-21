@@ -21,6 +21,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install Python 3.12
         uses: actions/setup-python@v5
@@ -33,11 +35,24 @@ jobs:
           python -m pip install --upgrade pip
           pip install ruff
 
+      - name: Get changed Python files
+        id: changed-python-files
+        uses: tj-actions/changed-files@v46
+        with:
+          files: |
+            **/*.py
+
       - name: Run ruff check
-        run: ruff check --output-format=github .
+        if: steps.changed-python-files.outputs.any_changed == 'true'
+        run: ruff check --output-format=github ${{ steps.changed-python-files.outputs.all_changed_files }}
 
       - name: Run ruff format check
-        run: ruff format --check .
+        if: steps.changed-python-files.outputs.any_changed == 'true'
+        run: ruff format --check ${{ steps.changed-python-files.outputs.all_changed_files }}
+
+      - name: Skip lint when no Python files changed
+        if: steps.changed-python-files.outputs.any_changed != 'true'
+        run: echo "No Python files changed; skipping Ruff checks."
 
   test:
     name: Test (Python ${{ matrix.python-version }}, ${{ matrix.os }})
