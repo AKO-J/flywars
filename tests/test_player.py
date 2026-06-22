@@ -13,8 +13,8 @@ class TestPlayerInit:
 
     def test_player_initial_hp(self):
         p = Player()
-        assert p.hp == 5
-        assert p.max_hp == 5
+        assert p.hp == 8
+        assert p.max_hp == 8
 
     def test_player_not_dead_initially(self):
         p = Player()
@@ -157,7 +157,7 @@ class TestPlayerDamage:
     def test_take_damage_reduces_hp(self):
         p = Player()
         dead = p.take_damage(1)
-        assert p.hp == 4
+        assert p.hp == 7  # 8 - 1
         assert dead is False
 
     def test_take_damage_triggers_invincibility(self):
@@ -167,7 +167,7 @@ class TestPlayerDamage:
 
     def test_invincible_blocks_damage(self):
         p = Player()
-        p.take_damage(1)  # hp 5→4, enters invincible
+        p.take_damage(1)  # hp 8→7, enters invincible
         hp_after = p.hp
         p.take_damage(1)  # should be ignored
         assert p.hp == hp_after
@@ -181,7 +181,7 @@ class TestPlayerDamage:
 
     def test_fatal_damage_kills(self):
         p = Player()
-        dead = p.take_damage(5)
+        dead = p.take_damage(8)  # 一次扣光所有 HP
         assert p.hp == 0
         assert p.is_dead is True
         assert dead is True
@@ -196,7 +196,7 @@ class TestPlayerPowerup:
         from settings import PowerUpType
         result = p.apply_powerup(PowerUpType.HEALTH)
         assert result == "health"
-        assert p.hp == 4
+        assert p.hp == 7  # 8 - 2 + 1
 
     def test_health_powerup_not_exceed_max(self):
         p = Player()

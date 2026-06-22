@@ -16,7 +16,7 @@ from settings import (
 
 
 class Star:
-    __slots__ = ("x", "y", "size", "speed", "color", "_base_color", "_phase", "_twinkle_speed")
+    __slots__ = ("x", "y", "size", "speed", "color", "_base_color", "_phase", "_twinkle_speed", "_glow_surf")
 
     def __init__(self, x, y, size, speed, brightness, color=(0, 0, 0)):
         self.x, self.y = x, y

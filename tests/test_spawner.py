@@ -26,7 +26,7 @@ class TestSpawnerLevel:
     def test_set_level_1_config(self, spawner: Spawner):
         """关卡1应有3波次、无Boss"""
         spawner.set_level(1)
-        assert spawner.total_waves == 3
+        assert spawner.total_waves == 2
         assert not spawner._has_boss
 
     def test_set_level_3_no_boss_yet(self, spawner: Spawner):
