@@ -57,6 +57,20 @@ class AIPlayer:
         self._log("START", "AI 自动驾驶测试开始")
         self._log("CONFIG", "HP=8 无敌=2s 升关回血 波间0.6s")
 
+        # ⭐ 调试信息（供游戏渲染用，可被 get_debug_info() 获取）
+        self._priority: str = "待命中"
+        self._target_x: float = 0.0
+        self._target_y: float = 0.0
+        self._threat_x: float = 0.0
+        self._threat_y: float = 0.0
+        self._threat_active: bool = False
+        self._nearest_enemy_x: float = 0.0
+        self._nearest_enemy_y: float = 0.0
+        self._nearest_enemy_active: bool = False
+        self._powerup_x: float = 0.0
+        self._powerup_y: float = 0.0
+        self._powerup_active: bool = False
+
     # ── 公开 API ──
 
     def log(self, tag: str, msg: str = ""):
@@ -104,17 +118,27 @@ class AIPlayer:
         px, py = s.player_x, s.player_y
         self._px, self._py = px, py  # ⭐ 保存给 _nearest 系列方法用
 
+        # 清空调试状态
+        self._priority = "⏳ 巡逻"
+        self._target_x = px; self._target_y = py - 50
+        self._threat_active = False
+        self._nearest_enemy_active = False
+        self._powerup_active = False
+
         # 1. 躲避子弹
         threat = self._nearest_threat(s)
         dvx, dvy = 0.0, 0.0
         if threat:
             tx, ty, tvx, tvy = threat
+            self._threat_x, self._threat_y = tx, ty
             if abs(px - tx) < 120 and abs(py - ty) < 200:
                 spd = (tvx**2 + tvy**2)**0.5
                 if spd > 0:
                     perp = (-tvy / spd, tvx / spd)
                     sign = 1 if px < s.screen_w / 2 else -1
                     dvx, dvy = sign * abs(perp[0]), perp[1]
+                    self._threat_active = True
+                    self._priority = "💨 躲避子弹"
 
         # 2. 攻击敌机
         near = self._nearest(s.enemies)
@@ -123,6 +147,10 @@ class AIPlayer:
             dx, dy = near[0] - px, near[1] - py
             d = max((dx**2 + dy**2)**0.5, 1)
             avx, avy = dx / d, dy / d * 0.4
+            self._nearest_enemy_x, self._nearest_enemy_y = near[0], near[1]
+            self._nearest_enemy_active = True
+            if not self._threat_active:
+                self._priority = "⚔️ 攻击敌机"
 
         # 3. Boss 战 — ⭐ 不站正下方，躲侧边持续输出
         if s.boss_active:
@@ -139,6 +167,8 @@ class AIPlayer:
             # 加强躲避
             dvx *= 2.0; dvy *= 2.0
             a["shoot"] = True
+            self._target_x, self._target_y = target_x, target_y
+            self._priority = "👑 Boss 战"
 
         # 4. 拾取
         cvx, cvy = 0.0, 0.0
@@ -148,6 +178,10 @@ class AIPlayer:
             d = max((dx**2 + dy**2)**0.5, 1)
             if d < 250:
                 cvx, cvy = dx / d * 0.6, dy / d * 0.6
+                self._powerup_x, self._powerup_y = pu[0], pu[1]
+                self._powerup_active = True
+                if not self._threat_active and not s.boss_active:
+                    self._priority = "📦 拾取道具"
 
         # 5. 合并
         vx = dvx * 0.5 + cvx * 0.3 + avx * 0.2
@@ -157,6 +191,18 @@ class AIPlayer:
 
         if not s.boss_active:
             a["shoot"] = near is not None
+
+        # 更新目标位置（用于画指示器）
+        if s.boss_active:
+            pass  # 已设置
+        elif threat and self._threat_active:
+            self._target_x = px + dvx * 50
+            self._target_y = py + dvy * 50
+        elif near and self._nearest_enemy_active:
+            self._target_x, self._target_y = near[0], near[1]
+        elif pu and self._powerup_active:
+            self._target_x, self._target_y = pu[0], pu[1]
+
         return a
 
     def _nearest_threat(self, s):
@@ -184,6 +230,30 @@ class AIPlayer:
             if d < bd:
                 bd, best = d, it
         return best
+
+    def get_debug_info(self) -> dict:
+        """返回当前帧的 AI 调试信息（供游戏渲染叠加层用）。"""
+        return {
+            "priority": self._priority,
+            "target_x": self._target_x,
+            "target_y": self._target_y,
+            "threat_x": self._threat_x,
+            "threat_y": self._threat_y,
+            "threat_active": self._threat_active,
+            "nearest_enemy_x": self._nearest_enemy_x,
+            "nearest_enemy_y": self._nearest_enemy_y,
+            "nearest_enemy_active": self._nearest_enemy_active,
+            "powerup_x": self._powerup_x,
+            "powerup_y": self._powerup_y,
+            "powerup_active": self._powerup_active,
+            "kills": self._kills,
+            "deaths": self._deaths,
+            "max_combo": self._max_combo,
+            "boss_seen": self._boss_seen,
+            "boss_killed": self._boss_killed,
+            "level": self._last_level,
+            "elapsed": time.time() - self._t0,
+        }
 
     def on_death(self):
         self._deaths += 1

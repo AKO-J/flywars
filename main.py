@@ -9,8 +9,28 @@
 """
 
 import sys
+
+# ⭐ 友好错误提示：缺少 pygame-ce 时直接告诉用户怎么装
+try:
+    from core.game import Game
+except ImportError as e:
+    if "pygame" in str(e).lower():
+        print()
+        print("=" * 55)
+        print("  \u26a0\ufe0f  pygame-ce \u672a\u5b89\u88c5\uff01")  # pygame-ce 未安装！
+        print("=" * 55)
+        print("  \u8bf7\u5728\u9879\u76ee\u76ee\u5f55\u4e0b\u8fd0\u884c\uff1a")  # 请在项目目录下运行：
+        print()
+        print("      pip install pygame-ce")
+        print()
+        print("  \u6216\u53cc\u51fb setup.bat \u81ea\u52a8\u5b89\u88c5")  # 或双击 setup.bat 自动安装
+        print()
+        print("=" * 55)
+    else:
+        print(f"Import error: {e}")
+    sys.exit(1)
+
 from config.config_manager import get_config
-from core.game import Game
 
 if __name__ == "__main__":
     ai_mode = "--ai" in sys.argv
@@ -35,5 +55,5 @@ if __name__ == "__main__":
     if ai_mode:
         ai = game.get_ai_player()
         if ai:
-            print("\n" + ai.summary())
+            print("\n" + ai.report())
             ai.close()

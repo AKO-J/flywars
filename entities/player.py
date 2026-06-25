@@ -182,6 +182,7 @@ class Player(pygame.sprite.DirtySprite):
         self._move_up_flag: bool = False
         self._move_down_flag: bool = False
         self._boost_flag: bool = False
+        self._ai_controlled: bool = False  # AI 模式：_read_input 跳过键盘
 
     # ====================================================================
     # 公共输入接口（由 Game.handle_events 调用）
@@ -309,17 +310,25 @@ class Player(pygame.sprite.DirtySprite):
             - dx, dy          : int  — 本帧 x/y 方向位移量（像素）
             - move_left/right : bool — 水平方向标记（用于朝向切换）
         """
-        # ----【方案A】get_pressed()：无延迟连续移动 ----
-        keys: pygame.key.ScancodeWrapper = pygame.key.get_pressed()
+        # ⭐ AI 模式：跳过键盘，使用 AI 设定的标记位
+        if self._ai_controlled:
+            move_left = self._move_left_flag
+            move_right = self._move_right_flag
+            move_up = self._move_up_flag
+            move_down = self._move_down_flag
+            boost = self._boost_flag
+        else:
+            # ----【方案A】get_pressed()：无延迟连续移动 ----
+            keys: pygame.key.ScancodeWrapper = pygame.key.get_pressed()
 
-        # 方向判断
-        move_left: bool = keys[pygame.K_a] or keys[pygame.K_LEFT]
-        move_right: bool = keys[pygame.K_d] or keys[pygame.K_RIGHT]
-        move_up: bool = keys[pygame.K_w] or keys[pygame.K_UP]
-        move_down: bool = keys[pygame.K_s] or keys[pygame.K_DOWN]
+            # 方向判断
+            move_left: bool = keys[pygame.K_a] or keys[pygame.K_LEFT]
+            move_right: bool = keys[pygame.K_d] or keys[pygame.K_RIGHT]
+            move_up: bool = keys[pygame.K_w] or keys[pygame.K_UP]
+            move_down: bool = keys[pygame.K_s] or keys[pygame.K_DOWN]
 
-        # Shift 加速判断（左右 Shift 都支持）
-        boost: bool = keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]
+            # Shift 加速判断（左右 Shift 都支持）
+            boost: bool = keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]
 
         # ---- 计算本帧速度 ----
         current_speed: float = (

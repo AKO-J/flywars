@@ -276,7 +276,8 @@ class Game:
         self._fps_accum: float = 0.0
         self._fps_frame_count: int = 0
         self._fps_display: float = 60.0
-        self._use_dirty_rects: bool = True  # 可切换对比
+        self._use_dirty_rects: bool = True  # 脏矩形优化；F3 可切换对比
+        self._bg_snapshot: pygame.Surface = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
 
         # ---- 已销毁精灵的 rect（用于脏矩形 clean-up）----
         self._killed_rects: list[pygame.Rect] = []
@@ -412,8 +413,9 @@ class Game:
                 return
             return  # 聊天输入模式下拦截其他按键
 
-        # Enter 键打开聊天输入（PLAYING 或 MENU 状态）
-        if key == pygame.K_RETURN and self.state in (GameState.PLAYING, GameState.MENU):
+        # Enter 键打开聊天输入（PLAYING 或 MENU 状态，排除密码/姓名输入模式）
+        if (key == pygame.K_RETURN and self.state in (GameState.PLAYING, GameState.MENU)
+                and not self._entering_password and not self._entering_name):
             self._chat_input_active = True
             self._chat_input_buffer = ""
             return
@@ -505,8 +507,6 @@ class Game:
                 if key == pygame.K_ESCAPE:
                     self._entering_password = False
                     self._join_target_rid = ""
-                    return
-                    self._entering_password = False
                     print("[MENU] 取消创建房间")
                     return
                 if key == pygame.K_BACKSPACE:
@@ -712,10 +712,11 @@ class Game:
             kills_this_frame=self.collision.kills_this_frame,
         )
         a = self._ai_player.update(s)
-        self.player.move_left = a["move_left"]
-        self.player.move_right = a["move_right"]
-        self.player.move_up = a["move_up"]
-        self.player.move_down = a["move_down"]
+        self.player._ai_controlled = True
+        self.player._move_left_flag = a["move_left"]
+        self.player._move_right_flag = a["move_right"]
+        self.player._move_up_flag = a["move_up"]
+        self.player._move_down_flag = a["move_down"]
         if a["shoot"]:
             self.player._is_firing = True
 
@@ -1426,8 +1427,10 @@ class Game:
     # ================================================================
 
     def render(self) -> None:
-        self.screen.fill(BLACK)
+        # ⭐ 背景直接覆盖全屏，无需 fill(BLACK)
         self.background.draw(self.screen)
+        # ⭐ 保存干净的背景快照（供 dirty-rect clear 擦除旧精灵位置用）
+        self._bg_snapshot.blit(self.screen, (0, 0))
         # ⭐ 粒子特效渲染（在最底层，背景之上、精灵之下）
         self.particles.draw(self.screen)
 
@@ -1491,15 +1494,21 @@ class Game:
             self.screen.blit(text_surf, text_rect)
 
         self._draw_log_panel()
+        # ⭐ AI 自动驾驶叠加显示
+        self._render_ai_overlay()
         self._draw_chat_ui()  # 聊天系统 UI（题13）
         # ⭐ 性能分析叠加显示
         self._profiler.draw(self.screen)
         pygame.display.flip()
 
     def _render_full(self) -> None:
-        """全屏渲染（PAUSED / GAME_OVER 或 F3 切换关闭脏矩形时使用）。"""
+        """全屏渲染（PAUSED / GAME_OVER 或 F3 切换关闭脏矩形时使用）。
+        注意：all_sprites 是 LayeredDirty 组，draw() 只画 dirty 精灵。
+        全重绘模式必须手动 blit 所有精灵，否则背景重绘后干净精灵会消失。
+        """
         if not self.player.is_invincible or self.frame_count % 8 < 4:
-            self.all_sprites.draw(self.screen)
+            for sprite in self.all_sprites:
+                self.screen.blit(sprite.image, sprite.rect)
         else:
             for sprite in self.all_sprites:
                 if sprite != self.player:
@@ -1610,10 +1619,9 @@ class Game:
           3. 叠加 UI 元素（蓄力条/Boss血条/HUD/飘字）
           4. display.update(all_rects) → 只刷新变化的屏幕区域
         """
-        # ① 擦除旧精灵位置 → 恢复为背景
-        # pygame 2.6.1 LayeredDirty.draw expects a Surface bgd, not a callback.
+        # ① 擦除旧精灵位置 → 用背景快照（无精灵残留，杜绝残影）
         clear_rects: list[pygame.Rect] = self.all_sprites.clear(
-            self.screen, self.screen
+            self.screen, self._bg_snapshot
         )
 
         # ② 擦除已销毁精灵的旧位置（killed 后已不在 all_sprites 中，需手动清理）
@@ -2317,6 +2325,119 @@ class Game:
                 for star in layer:
                     star.speed = new_speed
 
+    # ════════════════════════════════════════════════════════════════
+    # ⭐ AI 自动驾驶叠加显示
+    # ════════════════════════════════════════════════════════════════
+
+    def _render_ai_overlay(self) -> None:
+        """在游戏画面上叠加 AI 决策信息（仅 _ai_mode 时生效）。"""
+        if not self._ai_mode or not self._ai_player:
+            return
+        if self.state not in (GameState.PLAYING, GameState.PAUSED):
+            return
+        try:
+            self._render_ai_overlay_inner()
+        except Exception as e:
+            # 叠加层出错不应影响游戏本身
+            if not hasattr(self, '_ai_overlay_warned'):
+                print(f"[AI Overlay] 渲染异常: {e}")
+                self._ai_overlay_warned = True
+
+    def _render_ai_overlay_inner(self) -> None:
+        """实际的叠加渲染（被 _render_ai_overlay 的 try/except 包裹）。"""
+        dbg = self._ai_player.get_debug_info()
+        screen = self.screen
+
+        # 加载字体，失败时回退到默认字体
+        try:
+            font16 = pygame.font.Font(UI_FONT_PATH, 16)
+            font14 = pygame.font.Font(UI_FONT_PATH, 14)
+        except Exception:
+            font16 = pygame.font.Font(None, 16)
+            font14 = pygame.font.Font(None, 14)
+
+        # ═══ 右上角 AI 状态条 ═══
+        badge_color = (0, 200, 80) if dbg["priority"] != "⏳ 巡逻" else (180, 180, 60)
+        badge = font16.render(f"🤖 {dbg['priority']}", True, badge_color)
+        bx = SCREEN_WIDTH - badge.get_width() - 8
+        by = 50
+        # 半透明背景
+        bg = pygame.Surface((badge.get_width() + 16, 26), pygame.SRCALPHA)
+        bg.fill((0, 0, 0, 140))
+        screen.blit(bg, (bx - 4, by - 2))
+        screen.blit(badge, (bx, by))
+
+        # ═══ AI 统计面板（左上） ═══
+        stats_lines = [
+            f"HP: {self.player.hp}/{self.player.max_hp}",
+            f"击杀: {dbg['kills']}",
+            f"连击: {dbg['max_combo']}",
+            f"关卡: {dbg['level']}",
+        ]
+        panel_w = 100
+        panel_h = len(stats_lines) * 20 + 10
+        panel = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+        panel.fill((0, 0, 0, 120))
+        screen.blit(panel, (4, 50))
+        for i, line in enumerate(stats_lines):
+            sf = font14.render(line, True, (200, 220, 255))
+            screen.blit(sf, (10, 54 + i * 20))
+
+        # ═══ 目标位置十字标记 ═══
+        tx = int(dbg["target_x"])
+        ty = int(dbg["target_y"])
+        if 0 < tx < SCREEN_WIDTH and 0 < ty < SCREEN_HEIGHT:
+            alpha = 160
+            cross_color = (0, 255, 180, alpha)
+            # 十字线
+            pygame.draw.line(screen, cross_color[:3],
+                             (tx - 12, ty), (tx + 12, ty), 2)
+            pygame.draw.line(screen, cross_color[:3],
+                             (tx, ty - 12), (tx, ty + 12), 2)
+            # 外圈
+            pygame.draw.circle(screen, cross_color[:3],
+                               (tx, ty), 14, width=1)
+
+        # ═══ 威胁子弹指示（红箭头指向威胁源） ═══
+        if dbg["threat_active"]:
+            ppx = int(self.player.rect.centerx)
+            ppy = int(self.player.rect.centery)
+            tex = int(dbg["threat_x"])
+            tey = int(dbg["threat_y"])
+            pygame.draw.line(screen, (255, 80, 80),
+                             (ppx, ppy), (tex, tey), 1)
+            pygame.draw.circle(screen, (255, 40, 40),
+                               (tex, tey), 6, width=2)
+
+        # ═══ 最近敌机指示（黄线） ═══
+        if dbg["nearest_enemy_active"]:
+            ppx = int(self.player.rect.centerx)
+            ppy = int(self.player.rect.centery)
+            enx = int(dbg["nearest_enemy_x"])
+            eny = int(dbg["nearest_enemy_y"])
+            pygame.draw.line(screen, (255, 220, 60),
+                             (ppx, ppy), (enx, eny), 1,)
+
+        # ═══ 道具指示（浅蓝点） ═══
+        if dbg["powerup_active"]:
+            pux = int(dbg["powerup_x"])
+            puy = int(dbg["powerup_y"])
+            pygame.draw.circle(screen, (80, 200, 255),
+                               (pux, puy), 4)
+
+        # ═══ 底部状态条 ═══
+        if self.state == GameState.PLAYING:
+            elapsed = dbg.get("elapsed", 0)
+            status_text = f"🤖 AI MODE  |  已运行 {elapsed:.0f}s  |  Boss: {'✅' if dbg['boss_killed'] else '👀' if dbg['boss_seen'] else '❌'}  |  F1=判定点  F3=分析器"
+            st = font14.render(status_text, True, (150, 255, 150))
+            # 底部居中
+            sx = (SCREEN_WIDTH - st.get_width()) // 2
+            sy = SCREEN_HEIGHT - 22
+            bg2 = pygame.Surface((st.get_width() + 12, 20), pygame.SRCALPHA)
+            bg2.fill((0, 0, 0, 120))
+            screen.blit(bg2, (sx - 4, sy - 1))
+            screen.blit(st, (sx, sy))
+
     # ================================================================
     # 日志面板（题6：~ 键开关）
     # ================================================================
@@ -2800,12 +2921,13 @@ class Game:
                     self.spawner.set_level(checkpoint)
                     self.collision.current_level = checkpoint
                     continue
-                # 自停：Boss击败（等级>5）或超时（180秒）
+                # ⭐ AI 展示模式：打完 Boss/超时后自动循环重开（不自停）
                 if self.spawner.level > 5 or self._ai_player.elapsed() > 180:
                     if self._ai_player:
                         reason = "Boss已击败" if self.spawner.level > 5 else "超时"
-                        self._ai_player.log("DONE", reason)
-                    self.running = False
+                        self._ai_player.log("DONE", f"{reason} — 自动重开")
+                        self._ai_player.on_restart()
+                    self._start_game()
                     continue
                 if self._fast_mode:
                     self.clock.tick(600)

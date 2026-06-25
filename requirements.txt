@@ -2,9 +2,12 @@
 # 安装: pip install -r requirements.txt
 #
 # 完整开发环境: pip install -e ".[dev]"
+#
+# ⭐ ARM64 Windows (如 Surface Pro X/ARM 版) 需用 pygame-ce
+#    标准 x86-64 Windows 用 pygame 也行，但 pygame-ce 兼容性更好
 
-# 游戏引擎
-pygame>=2.0
+# 游戏引擎（pygame-ce 提供 pygame 命名空间，ARM64/x86-64 都支持）
+pygame-ce>=2.5
 
 # 测试框架
 pytest>=7.0
